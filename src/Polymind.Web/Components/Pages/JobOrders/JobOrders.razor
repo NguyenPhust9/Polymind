@@ -1,0 +1,235 @@
+@page "/jobs"
+@page "/job-orders"
+@attribute [Authorize(Policy = "job_orders:read")]
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Nav
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject IAuthorizationService AuthorizationService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Jobs — POLYMIND</PageTitle>
+
+<PageHeader Eyebrow="TUYỂN DỤNG" Title="Jobs" Subtitle="@($"{_rows.Count} jobs")">
+    <Actions>
+        <AuthorizeView Policy="job_orders:create">
+            <Authorized>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate">
+                    Thêm Job
+                </MudButton>
+            </Authorized>
+        </AuthorizeView>
+    </Actions>
+</PageHeader>
+
+@if (_rows.Count == 0)
+{
+    <MudAlert Severity="Severity.Info">Chưa có job nào.</MudAlert>
+}
+else
+{
+    @* Bộ lọc song song: nhóm việc làm + quốc gia (dropdown để gọn trên mobile, giữ icon/cờ trong item) *@
+    <div class="d-flex flex-wrap align-center mb-4" style="gap:12px">
+        <MudSelect T="JobCategory?" @bind-Value="_category" Label="Phân nhóm" Clearable="true" Placeholder="Tất cả"
+                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:230px;max-width:280px"
+                   ToStringFunc="@(c => c is null ? "" : Labels.Vi(c.Value))">
+            @foreach (var c in _categories)
+            {
+                <MudSelectItem T="JobCategory?" Value="@((JobCategory?)c.Key)">
+                    <div class="d-flex align-center" style="gap:8px">
+                        <MudIcon Icon="@Labels.IconOf(c.Key)" Size="Size.Small" Color="@Labels.ColorOf(c.Key)" />
+                        <span>@Labels.Vi(c.Key) (@c.Count)</span>
+                    </div>
+                </MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="string" @bind-Value="_country" Label="Quốc gia" Clearable="true" Placeholder="Tất cả"
+                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:210px;max-width:260px"
+                   ToStringFunc="@(c => string.IsNullOrWhiteSpace(c) ? "" : CountryDisplay.Of(c).Name)">
+            @foreach (var c in _countries)
+            {
+                var st = CountryDisplay.Of(c.Key);
+                <MudSelectItem T="string" Value="@c.Key">
+                    <div class="d-flex align-center" style="gap:8px">
+                        <CountryFlag Style="st" Size="22" />
+                        <span>@st.Name (@c.Count)</span>
+                    </div>
+                </MudSelectItem>
+            }
+        </MudSelect>
+    </div>
+}
+
+@* Hiển thị tách theo nhóm việc làm, thứ tự: trong nước → ngoài nước → du học *@
+@foreach (var group in Filtered.GroupBy(x => x.Category).OrderBy(g => Labels.RankOf(g.Key)))
+{
+    <div class="d-flex align-center mb-2 mt-1" style="gap:8px">
+        <MudIcon Icon="@Labels.IconOf(group.Key)" Color="@Labels.ColorOf(group.Key)" />
+        <MudText Typo="Typo.h6" Style="font-weight:700">@Labels.Vi(group.Key)</MudText>
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@Labels.ColorOf(group.Key)">@group.Count() job</MudChip>
+    </div>
+<MudGrid Class="mb-4">
+    @foreach (var j in group)
+    {
+        var country = CountryDisplay.Of(j.Country);
+        var open = Labels.IsOpen(j.Status);
+        <MudItem xs="12" sm="6" md="4">
+            <MudCard Elevation="0" Class="@(open ? "job-card pm-card job-card--open" : "job-card pm-card")"
+                     Style="@($"height:100%;cursor:pointer;border-left:5px solid var(--mud-palette-{ColorVar(open ? Color.Success : country.Color)});")"
+                     @onclick="@(() => Nav.NavigateTo($"/jobs/{j.Id}"))">
+                <MudCardContent>
+                    <div class="d-flex justify-space-between align-center flex-wrap mb-2" style="gap:8px">
+                        <div class="d-flex align-center" style="gap:8px;min-width:0">
+                            <CountryFlag Style="country" Size="34" />
+                            <MudChip T="string" Size="Size.Small" Color="country.Color">@country.Name</MudChip>
+                        </div>
+                        @if (open)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Success" Icon="@Icons.Material.Filled.FiberManualRecord">@Labels.Vi(j.Status)</MudChip>
+                        }
+                        else
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Labels.ColorOf(j.Status)">@Labels.Vi(j.Status)</MudChip>
+                        }
+                    </div>
+
+                    <MudText Typo="Typo.h6" Class="mb-1"><b>@(string.IsNullOrWhiteSpace(j.CompanyName) ? "(Chưa có công ty)" : j.CompanyName)</b></MudText>
+
+                    <div class="d-flex flex-column" style="gap:4px">
+                        @if (!string.IsNullOrWhiteSpace(j.Field))
+                        {
+                            <div class="d-flex align-center mud-text-secondary" style="gap:6px">
+                                <MudIcon Icon="@Icons.Material.Filled.Engineering" Size="Size.Small" />
+                                <MudText Typo="Typo.body2">@j.Field</MudText>
+                            </div>
+                        }
+                        <div class="d-flex align-center" style="gap:6px">
+                            <MudIcon Icon="@Icons.Material.Filled.Groups" Size="Size.Small" Color="Color.Primary" />
+                            <MudText Typo="Typo.body2"><b>@j.Quantity</b> ứng viên</MudText>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(j.SalaryDescription))
+                        {
+                            <div class="d-flex align-center" style="gap:6px">
+                                <MudIcon Icon="@Icons.Material.Filled.Payments" Size="Size.Small" Color="Color.Success" />
+                                <span class="money-bling" style="font-size:1.02rem">@j.SalaryDescription</span>
+                            </div>
+                        }
+                        @if (j.CostAmount is not null)
+                        {
+                            <div class="d-flex align-center" style="gap:6px">
+                                <MudIcon Icon="@Icons.Material.Filled.AccountBalanceWallet" Size="Size.Small" Color="Color.Warning" />
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">Tổng chi phí:</MudText>
+                                <Money Amount="j.CostAmount" />
+                            </div>
+                        }
+                        @{ var dl = DeadlineInfo(j); }
+                        @if (dl.Text.Length > 0)
+                        {
+                            <div class="d-flex align-center" style="gap:6px">
+                                <MudIcon Icon="@Icons.Material.Filled.Event" Size="Size.Small" Color="@(dl.Urgent ? Color.Error : Color.Default)" />
+                                <MudText Typo="Typo.body2" Class="@(dl.Urgent ? "" : "mud-text-secondary")"
+                                         Style="@(dl.Urgent ? "color:var(--mud-palette-error);font-weight:600" : "")">@dl.Text</MudText>
+                            </div>
+                        }
+                    </div>
+
+                    <MudDivider Class="my-2" />
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@j.Code</MudText>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+    }
+</MudGrid>
+}
+
+@code {
+    private List<JobOrder> _rows = new();
+    private List<(string Key, int Count)> _countries = new();
+    private List<(JobCategory Key, int Count)> _categories = new();
+    private string? _country;
+    private JobCategory? _category;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private List<JobOrder> Filtered => _rows
+        .Where(j => (_country is null || string.Equals(j.Country, _country, StringComparison.OrdinalIgnoreCase))
+                    && (_category is null || j.Category == _category))
+        .ToList();
+
+    // Hạn ứng tuyển: còn ≤7 ngày hoặc đã quá hạn → tô đỏ (góp ý Vietgroup).
+    private static (string Text, bool Urgent) DeadlineInfo(JobOrder j)
+    {
+        var posted = j.PostedDate is DateOnly p ? $"Đăng {p:dd/MM/yyyy}" : null;
+        if (j.ApplicationDeadline is not DateOnly d)
+            return (posted ?? "", false);
+
+        var daysLeft = d.DayNumber - DateOnly.FromDateTime(DateTime.Today).DayNumber;
+        var deadline = daysLeft < 0
+            ? $"Hết hạn {d:dd/MM/yyyy}"
+            : daysLeft <= 7
+                ? $"Hạn {d:dd/MM/yyyy} (còn {daysLeft} ngày)"
+                : $"Hạn {d:dd/MM/yyyy}";
+        return (posted is null ? deadline : $"{posted} • {deadline}", daysLeft <= 7);
+    }
+
+    private async Task Load()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var rows = await db.JobOrders.OrderByDescending(j => j.CreatedAt).ToListAsync();
+        // Sort theo nhóm việc làm (trong nước → ngoài nước → du học), rồi đơn "đang tuyển (mở)"
+        // nổi lên đầu, rồi gom theo quốc gia cho dễ nhìn.
+        _rows = rows
+            .OrderBy(j => Labels.RankOf(j.Category))
+            .ThenByDescending(j => Labels.IsOpen(j.Status))
+            .ThenBy(j => CountryDisplay.Of(j.Country).Name)
+            .ToList();
+        _countries = _rows
+            .GroupBy(j => j.Country)
+            .Select(g => (Key: g.Key, Count: g.Count()))
+            .OrderByDescending(x => x.Count)
+            .ThenBy(x => CountryDisplay.Of(x.Key).Name)
+            .ToList();
+        _categories = _rows
+            .GroupBy(j => j.Category)
+            .Select(g => (Key: g.Key, Count: g.Count()))
+            .OrderBy(x => Labels.RankOf(x.Key))
+            .ToList();
+    }
+
+    private static string ColorVar(Color color) => color switch
+    {
+        Color.Primary => "primary",
+        Color.Secondary => "secondary",
+        Color.Tertiary => "tertiary",
+        Color.Info => "info",
+        Color.Success => "success",
+        Color.Warning => "warning",
+        Color.Error => "error",
+        Color.Dark => "dark",
+        _ => "lines-default"
+    };
+
+    private async Task OpenCreate()
+    {
+        if (!await HasPermission("job_orders:create"))
+        {
+            Snackbar.Add("Bạn không có quyền tạo job.", Severity.Warning);
+            return;
+        }
+
+        var dialog = await DialogService.ShowAsync<JobOrderDialog>("Thêm Job mới");
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+        {
+            Snackbar.Add("Đã thêm job mới", Severity.Success);
+            await Load();
+        }
+    }
+
+    private async Task<bool> HasPermission(string permission)
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var result = await AuthorizationService.AuthorizeAsync(authState.User, null, permission);
+        return result.Succeeded;
+    }
+}

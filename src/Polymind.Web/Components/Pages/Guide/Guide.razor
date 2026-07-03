@@ -1,0 +1,325 @@
+@page "/guide"
+@attribute [Authorize]
+@using Polymind.Infrastructure.Persistence.Constants
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Hướng dẫn sử dụng — POLYMIND</PageTitle>
+
+<PageHeader Eyebrow="TRỢ GIÚP" Title="Hướng dẫn sử dụng" Subtitle="Tài liệu hướng dẫn thao tác trên hệ thống POLYMIND OLMS." />
+
+<MudAlert Severity="Severity.Info" Class="mb-4">
+    <div class="guide-role-summary">
+        <MudChip T="string" Color="@_profile.Color" Variant="Variant.Filled" Icon="@_profile.Icon">@_profile.Label</MudChip>
+        <MudText Typo="Typo.body2">@_profile.Intro</MudText>
+    </div>
+</MudAlert>
+
+<MudExpansionPanels MultiExpansion="true" Elevation="1">
+    @foreach (var sec in _sections)
+    {
+        <MudExpansionPanel>
+            <TitleContent>
+                <div class="d-flex align-center" style="gap:10px">
+                    <MudIcon Icon="@sec.Icon" Color="Color.Primary" />
+                    <MudText Typo="Typo.subtitle1"><b>@sec.Title</b></MudText>
+                </div>
+            </TitleContent>
+            <ChildContent>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2">@sec.Summary</MudText>
+                <ul class="guide-steps">
+                    @foreach (var step in sec.Steps)
+                    {
+                        <li><MudText Typo="Typo.body2">@step</MudText></li>
+                    }
+                </ul>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    <em>@sec.Note</em>
+                </MudText>
+            </ChildContent>
+        </MudExpansionPanel>
+    }
+</MudExpansionPanels>
+
+<style>
+    .guide-role-summary { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .guide-steps { margin: 0 0 8px 0; padding-left: 20px; }
+    .guide-steps li { margin-bottom: 6px; padding-left: 2px; }
+    .guide-steps li::marker { color: var(--mud-palette-secondary); }
+    .guide-steps .mud-typography { line-height: 1.55; }
+</style>
+
+@code {
+    private readonly string[] _rolePriority =
+    {
+        RoleNames.SuperAdmin,
+        RoleNames.Director,
+        RoleNames.RecruitmentManager,
+        RoleNames.Recruiter,
+        RoleNames.Consultant,
+        RoleNames.DocumentStaff,
+        RoleNames.VisaStaff,
+        RoleNames.Accountant,
+        RoleNames.Agent,
+        RoleNames.Collaborator,
+    };
+
+    private GuideProfile _profile = new(RoleNames.Recruiter, "Nhân viên tuyển dụng", Icons.Material.Filled.PersonSearch, Color.Info,
+        "Hướng dẫn thao tác được cá nhân hóa theo vai trò đang đăng nhập.");
+    private GuideSection[] _sections = Array.Empty<GuideSection>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = auth.User;
+        var role = _rolePriority.FirstOrDefault(user.IsInRole) ?? RoleNames.Recruiter;
+
+        _profile = BuildProfile(role);
+        _sections = BuildSections(role);
+    }
+
+    private static GuideProfile BuildProfile(string role) => role switch
+    {
+        RoleNames.SuperAdmin => new(role, "Super Admin", Icons.Material.Filled.Shield, Color.Error,
+            "Bạn đang xem hướng dẫn dành cho tài khoản toàn quyền: quản trị người dùng, phân quyền, dữ liệu và kiểm soát hệ thống."),
+        RoleNames.Director => new(role, "Giám đốc", Icons.Material.Filled.Star, Color.Warning,
+            "Bạn đang xem hướng dẫn dành cho cấp quản lý: theo dõi tổng quan, duyệt số liệu, kiểm tra hiệu quả tuyển dụng và tài chính."),
+        RoleNames.RecruitmentManager => new(role, "Trưởng phòng tuyển dụng", Icons.Material.Filled.SupervisorAccount, Color.Primary,
+            "Bạn đang xem hướng dẫn dành cho trưởng phòng: điều phối lead, ứng viên, tư vấn viên và tiến độ tuyển dụng."),
+        RoleNames.Recruiter => new(role, "Nhân viên tuyển dụng", Icons.Material.Filled.PersonSearch, Color.Info,
+            "Bạn đang xem hướng dẫn dành cho tuyển dụng: nhập lead, chăm sóc ứng viên, gắn job và cập nhật tiến độ."),
+        RoleNames.Consultant => new(role, "Tư vấn viên", Icons.Material.Filled.SupportAgent, Color.Secondary,
+            "Bạn đang xem hướng dẫn dành cho tư vấn viên: theo sát lead/ứng viên được phân công và giữ thông tin chăm sóc luôn mới."),
+        RoleNames.DocumentStaff => new(role, "Bộ phận hồ sơ", Icons.Material.Filled.FolderShared, Color.Secondary,
+            "Bạn đang xem hướng dẫn dành cho bộ phận hồ sơ: kiểm tra giấy tờ, cập nhật thiếu/đủ hồ sơ và phối hợp với tuyển dụng."),
+        RoleNames.VisaStaff => new(role, "Bộ phận visa", Icons.Material.Filled.FlightTakeoff, Color.Tertiary,
+            "Bạn đang xem hướng dẫn dành cho visa/xuất cảnh: cập nhật visa, lịch bay và các mốc trước xuất cảnh."),
+        RoleNames.Accountant => new(role, "Kế toán", Icons.Material.Filled.AccountBalance, Color.Success,
+            "Bạn đang xem hướng dẫn dành cho kế toán: quản lý khoản thu/chi, công nợ, vay vốn và hoa hồng."),
+        RoleNames.Agent => new(role, "Đại lý", Icons.Material.Filled.Handshake, Color.Dark,
+            "Bạn đang xem hướng dẫn dành cho đại lý: theo dõi CTV trực thuộc, ứng viên giới thiệu, hoa hồng và phần còn lại sau khi chia cho CTV."),
+        RoleNames.Collaborator => new(role, "Cộng tác viên", Icons.Material.Filled.Diversity3, Color.Secondary,
+            "Bạn đang xem hướng dẫn dành cho CTV: theo dõi đại lý chủ quản, ứng viên mình giới thiệu và phần hoa hồng được hưởng."),
+        _ => new(role, RoleNames.All.GetValueOrDefault(role, "Người dùng"), Icons.Material.Filled.MenuBook, Color.Primary,
+            "Hướng dẫn thao tác được cá nhân hóa theo quyền hiện tại của bạn."),
+    };
+
+    private static GuideSection[] BuildSections(string role) => role switch
+    {
+        RoleNames.SuperAdmin => CommonStart().Concat(new[]
+        {
+            Sec("Quản trị tài khoản & phân quyền", Icons.Material.Filled.AdminPanelSettings,
+                "Tạo tài khoản, đổi vai trò, sửa thông tin đăng nhập và kiểm soát quyền theo module.",
+                "Vào Quản trị → Tài khoản để tạo user mới hoặc sửa họ tên/email/mật khẩu.",
+                "Mỗi user nên chỉ có role đúng nghiệp vụ để menu và hướng dẫn hiển thị chính xác.",
+                "Vào tab Phân quyền để bật/tắt quyền theo tài nguyên; kiểm tra lại bằng tài khoản role tương ứng."),
+            Sec("Kiểm tra dữ liệu toàn hệ thống", Icons.Material.Filled.QueryStats,
+                "Theo dõi số liệu tổng quan, báo cáo, tài chính, hoa hồng và nhật ký thao tác.",
+                "Dùng Tổng quan/Báo cáo để so doanh thu, chi phí, lead, ứng viên và tiến độ xuất cảnh.",
+                "Kiểm tra Nhật ký thao tác khi cần truy vết người sửa dữ liệu quan trọng.",
+                "Trước khi public production, không dùng tài khoản mẫu/mật khẩu Admin@123."),
+            Sec("Điều phối vận hành", Icons.Material.Filled.Hub,
+                "Nắm luồng Lead → Ứng viên → Job → Hồ sơ/Visa → Tài chính.",
+                "Kiểm tra lead mới, ứng viên đang kẹt bước, khoản thu quá hạn và hồ sơ sắp xuất cảnh.",
+                "Dùng Tin nhắn/Thông báo để nhắc đúng bộ phận xử lý việc tồn.",
+                "Khi sửa cấu hình lớn, build/test lại trước khi gửi link cho đối tác."),
+        }).ToArray(),
+
+        RoleNames.Director => CommonStart().Concat(new[]
+        {
+            Sec("Theo dõi điều hành", Icons.Material.Filled.Dashboard,
+                "Xem tình hình tuyển dụng, doanh thu, chi phí, công nợ và lịch xuất cảnh.",
+                "Vào Tổng quan để xem KPI chính và bấm từng thẻ để xem bảng chi tiết.",
+                "Vào Báo cáo để lọc theo tháng/quý/năm và xem biểu đồ trực quan.",
+                "Ưu tiên kiểm các mục quá hạn, ứng viên gần xuất cảnh và job đang tuyển."),
+            Sec("Xem tài chính & duyệt hoa hồng", Icons.Material.Filled.Verified,
+                "Kiểm tra khoản thu/chi, hoa hồng đại lý/CTV và số liệu đã ghi nhận.",
+                "Vào Tài chính để xem khoản thu, chi phí, công nợ và tiến độ đóng tiền; Giám đốc không ghi nhận hoặc đánh dấu đã đóng.",
+                "Vào Đại lý & Hoa hồng để xem Top đại lý/CTV và duyệt các khoản cần xác nhận.",
+                "Kế toán là bộ phận ghi nhận thu/chi và đánh dấu hoa hồng đã chi sau khi được duyệt."),
+            Sec("Trao đổi nội bộ", Icons.Material.Filled.Forum,
+                "Dùng tin nhắn và thông báo để giao việc cho trưởng phòng, tuyển dụng, kế toán, visa/hồ sơ.",
+                "Mở Tin nhắn để trao đổi nhanh theo đúng người phụ trách.",
+                "Mở Thông báo để xem việc hệ thống nhắc: công nợ, visa, xuất cảnh, hoa hồng.",
+                "Nếu thấy số liệu bất thường, yêu cầu bộ phận liên quan kiểm tra trước khi chốt."),
+        }).ToArray(),
+
+        RoleNames.RecruitmentManager => CommonStart().Concat(new[]
+        {
+            Sec("Điều phối Lead & tư vấn viên", Icons.Material.Filled.ContactPhone,
+                "Quản lý nguồn lead, phân công tư vấn viên và theo dõi trạng thái chăm sóc.",
+                "Vào Lead (CRM) để lọc lead mới, lead hẹn tư vấn và lead nguồn CTV.",
+                "Khi thêm lead nguồn giới thiệu, chọn đúng CTV để hoa hồng về đúng nguồn.",
+                "Phân công đúng tư vấn viên phụ trách để ứng viên được theo sát xuyên suốt."),
+            Sec("Quản lý ứng viên & job", Icons.Material.Filled.Groups,
+                "Theo dõi ứng viên, job phù hợp và tiến độ 20 bước.",
+                "Vào Ứng viên để lọc theo quốc gia/job/bước hiện tại.",
+                "Mở chi tiết ứng viên để xem TVV/CTV, hồ sơ vay và tiến độ xử lý.",
+                "Gắn ứng viên vào job phù hợp rồi phối hợp hồ sơ/visa/kế toán khi tới bước liên quan."),
+            Sec("Báo cáo tuyển dụng", Icons.Material.Filled.Assessment,
+                "Theo dõi phễu tuyển dụng và hiệu quả theo nguồn.",
+                "Vào Báo cáo để xem lead theo nguồn, ứng viên theo bước, doanh thu theo quốc gia.",
+                "Vào Đại lý & Hoa hồng để xem chất lượng nguồn giới thiệu.",
+                "Dùng dữ liệu này để ưu tiên job/nguồn đang có tỉ lệ chuyển đổi tốt."),
+        }).ToArray(),
+
+        RoleNames.Recruiter => CommonStart().Concat(new[]
+        {
+            Sec("Nhập và chăm sóc Lead", Icons.Material.Filled.ContactPhone,
+                "Tạo lead mới, cập nhật lịch hẹn và chuyển lead đủ điều kiện thành ứng viên.",
+                "Vào Lead (CRM) → Thêm Lead, nhập đủ số điện thoại, nguồn và tư vấn viên.",
+                "Cập nhật trạng thái/lịch hẹn sau mỗi lần gọi để tránh bỏ sót.",
+                "Khi lead đồng ý tham gia, mở chi tiết lead và chuyển thành ứng viên."),
+            Sec("Quản lý ứng viên phụ trách", Icons.Material.Filled.Groups,
+                "Cập nhật thông tin ứng viên, job mong muốn, nguồn giới thiệu và bước xử lý.",
+                "Vào Ứng viên để tìm nhanh theo tên, quốc gia, nghề và bước hiện tại.",
+                "Mở chi tiết ứng viên để cập nhật hồ sơ, xem TVV/CTV và tiến độ đóng tiền.",
+                "Khi có thay đổi quan trọng, nhắn bộ phận hồ sơ/visa/kế toán ngay trong Tin nhắn."),
+            Sec("Tra cứu Jobs", Icons.Material.Filled.WorkOutline,
+                "Tìm job phù hợp theo quốc gia, nghề, lương, chi phí và đãi ngộ.",
+                "Vào Jobs để lọc theo quốc gia và xem job đang tuyển.",
+                "Mở chi tiết job để xem yêu cầu, quyền lợi và danh sách ứng viên trong job.",
+                "Chỉ tư vấn job còn tuyển và khớp điều kiện ứng viên."),
+        }).ToArray(),
+
+        RoleNames.Consultant => CommonStart().Concat(new[]
+        {
+            Sec("Theo sát Lead được giao", Icons.Material.Filled.SupportAgent,
+                "Tập trung chăm sóc lead/ứng viên do bạn phụ trách.",
+                "Vào Lead (CRM) để xem lead được phân công, trạng thái và lịch hẹn.",
+                "Ghi chú/cập nhật trạng thái sau mỗi lần tư vấn để trưởng phòng nắm tiến độ.",
+                "Lead nguồn giới thiệu phải giữ đúng CTV để không lệch công nhận nguồn."),
+            Sec("Theo sát ứng viên", Icons.Material.Filled.Groups,
+                "Giữ hồ sơ ứng viên luôn đầy đủ và đẩy ứng viên qua các bước đúng thời điểm.",
+                "Vào Ứng viên để tìm ứng viên theo tên/quốc gia/bước.",
+                "Mở chi tiết để xem card Người phụ trách, hồ sơ vay, job và tiến độ đóng tiền.",
+                "Khi ứng viên thiếu giấy tờ, nhắn bộ phận hồ sơ; khi gần visa/xuất cảnh, nhắn bộ phận visa."),
+            Sec("Dùng Trợ lý AI", Icons.Material.Filled.AutoAwesome,
+                "Hỏi nhanh dữ liệu ứng viên và lập kế hoạch chăm sóc.",
+                "Bấm nút Trợ lý AI trên app bar để mở hỏi-đáp.",
+                "Có thể hỏi: ứng viên nào tiềm năng nhất, ai cần chăm sóc hôm nay, hồ sơ nào còn thiếu.",
+                "Kết quả AI chỉ hỗ trợ quyết định; vẫn đối chiếu với dữ liệu chi tiết trước khi thao tác."),
+        }).ToArray(),
+
+        RoleNames.DocumentStaff => CommonStart().Concat(new[]
+        {
+            Sec("Kiểm tra hồ sơ ứng viên", Icons.Material.Filled.FolderShared,
+                "Cập nhật tình trạng giấy tờ và nhắc các hồ sơ còn thiếu.",
+                "Vào Ứng viên để tìm hồ sơ theo tên, quốc gia hoặc bước hiện tại.",
+                "Mở chi tiết ứng viên để sửa thông tin cơ bản, xem mục hồ sơ, tải file và xem lịch sử phiên bản nếu có.",
+                "Khi hồ sơ sai/trùng/không còn dùng, có thể xóa sau khi xác nhận chắc chắn."),
+            Sec("Rà soát Lead đầu vào", Icons.Material.Filled.PersonSearch,
+                "Bộ phận hồ sơ được hỗ trợ sửa/xóa Lead khi dữ liệu đầu vào sai hoặc thiếu.",
+                "Mở chi tiết Lead để chỉnh thông tin cá nhân, nguồn, tư vấn viên hoặc đơn hàng quan tâm.",
+                "Khi xóa Lead/Ứng viên, hệ thống luôn hỏi xác nhận trước để tránh mất dữ liệu ngoài ý muốn.",
+                "Nếu Lead đã chuyển thành ứng viên, cần đối chiếu hồ sơ ứng viên trước khi xóa."),
+            Sec("Phối hợp với Visa", Icons.Material.Filled.FlightTakeoff,
+                "Bàn giao hồ sơ đủ điều kiện cho bộ phận visa/xuất cảnh.",
+                "Theo dõi ứng viên ở các bước chuẩn bị nộp hồ sơ/visa.",
+                "Kiểm tra các thông tin cá nhân, giấy tờ, người bảo hộ trước khi chuyển tiếp.",
+                "Nếu phát hiện sai lệch, cập nhật ngay trước khi visa sử dụng dữ liệu."),
+            Sec("Thông báo công việc", Icons.Material.Filled.Notifications,
+                "Xử lý các nhắc việc liên quan tới hồ sơ và ứng viên.",
+                "Mở Thông báo để xem hồ sơ cần bổ sung hoặc việc quá hạn.",
+                "Dùng Tin nhắn để hỏi nhanh người phụ trách khi thiếu dữ liệu.",
+                "Sau khi xử lý xong, cập nhật trạng thái để các bộ phận khác thấy dữ liệu mới."),
+        }).ToArray(),
+
+        RoleNames.VisaStaff => CommonStart().Concat(new[]
+        {
+            Sec("Quản lý visa", Icons.Material.Filled.AssignmentTurnedIn,
+                "Theo dõi trạng thái visa, ngày nộp, phỏng vấn và kết quả.",
+                "Vào Visa & Xuất cảnh → Hồ sơ Visa để thêm hoặc cập nhật hồ sơ.",
+                "Chọn đúng ứng viên/job để quốc gia và thông tin liên quan khớp.",
+                "Nếu visa bị từ chối hoặc cần bổ sung, ghi rõ lý do để tuyển dụng/hồ sơ xử lý."),
+            Sec("Quản lý lịch bay", Icons.Material.Filled.FlightTakeoff,
+                "Cập nhật vé máy bay, ngày giờ bay và trạng thái xuất cảnh.",
+                "Vào tab Vé máy bay để thêm lịch bay cho ứng viên đủ điều kiện.",
+                "Kiểm tra sân bay, hãng bay, mã vé và ngày giờ trước khi lưu.",
+                "Theo dõi Thông báo để không bỏ sót lịch xuất cảnh sắp tới."),
+            Sec("Tra cứu ứng viên", Icons.Material.Filled.Groups,
+                "Đối chiếu thông tin ứng viên trước khi xử lý visa/xuất cảnh.",
+                "Mở chi tiết ứng viên để kiểm tra job, quốc gia, tiến độ và giấy tờ.",
+                "Khi dữ liệu cá nhân chưa đủ, nhắn bộ phận hồ sơ hoặc tư vấn viên.",
+                "Không tự sửa dữ liệu ngoài phạm vi nếu chưa có xác nhận từ người phụ trách."),
+        }).ToArray(),
+
+        RoleNames.Accountant => CommonStart().Concat(new[]
+        {
+            Sec("Tiến độ đóng tiền", Icons.Material.Filled.Payments,
+                "Theo dõi 4 bước đóng tiền theo chi phí job và công nợ ứng viên.",
+                "Vào Tài chính → Tiến độ đóng tiền để xem % hoàn tất từng ứng viên.",
+                "Chỉ đánh dấu bước kế tiếp khi đã xác nhận tiền thực nhận.",
+                "Nếu lịch đóng tiền chưa có, tạo lịch trước rồi mới ghi nhận thanh toán."),
+            Sec("Khoản thu, khoản chi & phiếu", Icons.Material.Filled.ReceiptLong,
+                "Quản lý khoản thu/chi, phiếu thu/chi và đối chiếu số liệu.",
+                "Vào Tài chính để thêm khoản thu, khoản chi và xem công nợ.",
+                "Kiểm tra ngày, số tiền, phương thức, ứng viên và nội dung trước khi lưu.",
+                "Dùng báo cáo để đối chiếu tổng thu/chi theo khoảng thời gian."),
+            Sec("Vay vốn & hoa hồng", Icons.Material.Filled.AccountBalance,
+                "Theo dõi hồ sơ vay, giải ngân và chi hoa hồng đại lý/CTV.",
+                "Vào Hỗ trợ vay để thêm khoản vay cho ứng viên hiện có và cập nhật trạng thái đang vay/đã giải ngân.",
+                "Vào Đại lý & Hoa hồng để xem khoản chờ duyệt/đã chi.",
+                "Chỉ đánh dấu đã chi hoa hồng khi có chứng từ hoặc xác nhận thanh toán."),
+        }).ToArray(),
+
+        RoleNames.Agent => CommonStart().Concat(new[]
+        {
+            Sec("Theo dõi ứng viên giới thiệu", Icons.Material.Filled.Groups,
+                "Xem danh sách ứng viên/lead liên quan tới nguồn giới thiệu của bạn.",
+                "Vào Ứng viên để kiểm tra thông tin cơ bản và tiến độ xử lý.",
+                "Theo dõi bước hiện tại để biết ứng viên đang ở giai đoạn nào.",
+                "Nếu cần bổ sung thông tin, nhắn nhân sự phụ trách thay vì tự sửa ngoài quyền."),
+            Sec("Hoa hồng của tôi", Icons.Material.Filled.Handshake,
+                "Theo dõi hoa hồng phát sinh từ ứng viên/CTV thuộc nguồn của bạn.",
+                "Vào Hoa hồng của tôi để xem mốc, trạng thái chờ duyệt/đã duyệt/đã chi.",
+                "Đối chiếu tên ứng viên, job và số tiền trước khi phản hồi.",
+                "Nếu số liệu chưa đúng, gửi tin nhắn cho kế toán hoặc người phụ trách."),
+            Sec("Thông báo & liên hệ", Icons.Material.Filled.Notifications,
+                "Xem nhắc việc và trao đổi với đội ngũ POLYMIND.",
+                "Mở Thông báo để xem cập nhật mới về ứng viên/hoa hồng.",
+                "Dùng Tin nhắn để hỏi trạng thái ứng viên hoặc hồ sơ thanh toán.",
+                "Giữ thông tin liên hệ rõ ràng để đội ngũ xử lý nhanh khi cần xác minh."),
+        }).ToArray(),
+
+        RoleNames.Collaborator => CommonStart().Concat(new[]
+        {
+            Sec("Đại lý chủ quản", Icons.Material.Filled.Storefront,
+                "Xem rõ bạn đang thuộc đại lý nào và các thông tin liên quan đến nguồn giới thiệu.",
+                "Vào Hoa hồng của tôi để xem tên đại lý chủ quản.",
+                "Nếu đại lý chủ quản hoặc thông tin CTV chưa đúng, báo lại POLYMIND để cập nhật.",
+                "Không dùng tài khoản CTV để xem dữ liệu của đại lý/CTV khác."),
+            Sec("Ứng viên tôi giới thiệu", Icons.Material.Filled.Groups,
+                "Theo dõi danh sách ứng viên do chính bạn giới thiệu.",
+                "Vào Ứng viên để xem tiến độ xử lý của từng hồ sơ trong phạm vi CTV của bạn.",
+                "Mỗi ứng viên chỉ thuộc một CTV/đại lý trong hệ thống để tránh nhầm hoa hồng.",
+                "Khi cần bổ sung thông tin, gửi tin nhắn cho nhân sự phụ trách."),
+            Sec("Hoa hồng CTV", Icons.Material.Filled.Paid,
+                "Xem hoa hồng qua đại lý và phần CTV được hưởng sau khi áp dụng tỷ lệ chia.",
+                "Vào Hoa hồng của tôi để xem từng mốc, trạng thái và số tiền CTV còn lại.",
+                "Tỷ lệ chia do đại lý/POLYMIND cấu hình cho từng CTV.",
+                "Nếu số liệu chưa đúng, gửi tin nhắn kèm tên ứng viên và mốc hoa hồng cần kiểm tra."),
+        }).ToArray(),
+
+        _ => CommonStart().ToArray(),
+    };
+
+    private static IEnumerable<GuideSection> CommonStart()
+    {
+        yield return Sec("Bắt đầu & Đăng nhập", Icons.Material.Filled.Login,
+            "Đăng nhập, làm quen giao diện và thao tác an toàn trong hệ thống.",
+            "Đăng nhập bằng tài khoản được cấp; không chia sẻ mật khẩu cho người khác.",
+            "Menu bên trái chỉ hiện các module đúng quyền của bạn.",
+            "Thanh trên có thông báo, tin nhắn, trợ lý AI và nút sáng/tối.");
+        yield return Sec("Quy tắc thao tác chung", Icons.Material.Filled.Rule,
+            "Các nguyên tắc giúp dữ liệu không bị lệch giữa các bộ phận.",
+            "Tìm kỹ trước khi tạo mới để tránh trùng lead/ứng viên.",
+            "Sau mỗi lần xử lý, cập nhật trạng thái hoặc ghi chú ngay trong ngày.",
+            "Dữ liệu tiền, visa, hồ sơ và hoa hồng phải đối chiếu trước khi xác nhận.");
+    }
+
+    private static GuideSection Sec(string title, string icon, string summary, params string[] steps)
+        => new(title, icon, summary, steps, "Hướng dẫn này được lọc theo vai trò đang đăng nhập.");
+
+    private record GuideProfile(string Role, string Label, string Icon, Color Color, string Intro);
+    private record GuideSection(string Title, string Icon, string Summary, string[] Steps, string Note);
+}

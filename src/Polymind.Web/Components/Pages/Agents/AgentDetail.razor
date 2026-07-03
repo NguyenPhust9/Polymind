@@ -1,0 +1,399 @@
+@page "/agents/{Id:guid}"
+@attribute [Authorize(Policy = "agents:read")]
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Nav
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject IAuthorizationService AuthorizationService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject AgentScope AgentScope
+
+<PageTitle>Chi tiết Đại lý — POLYMIND</PageTitle>
+
+@if (_agent is null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <div class="d-flex justify-space-between align-center mb-3">
+        <MudButton StartIcon="@Icons.Material.Filled.ArrowBack" OnClick="@(() => Nav.NavigateTo("/agents"))">Quay lại</MudButton>
+        @if (_canUpdate)
+        {
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Edit" OnClick="OpenEdit">Sửa đại lý</MudButton>
+        }
+    </div>
+
+    <MudGrid>
+        <MudItem xs="12" md="5">
+            <MudPaper Class="pa-4 mb-4" Elevation="1">
+                <div class="d-flex justify-space-between align-center mb-3">
+                    <div>
+                        <MudText Typo="Typo.h6"><b>@_agent.Name</b></MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@_agent.Code</MudText>
+                    </div>
+                    <MudChip T="string" Color="@(_agent.IsActive ? Color.Success : Color.Default)">@(_agent.IsActive ? "Đang hợp tác" : "Ngừng")</MudChip>
+                </div>
+                <MudDivider Class="mb-3" />
+                <MudGrid>
+                    @Field("Người đại diện", _agent.RepresentativeName)
+                    @Field("Số điện thoại", _agent.Phone)
+                    @Field("Email", _agent.Email)
+                    @Field("Số TK", _agent.BankAccountNumber)
+                    @Field("Ngân hàng", _agent.BankName)
+                    @Field("Chủ TK", _agent.BankAccountName)
+                </MudGrid>
+                @if (!string.IsNullOrWhiteSpace(_agent.Address))
+                {
+                    <MudText Typo="Typo.body2" Class="mt-2"><b>Địa chỉ:</b> @_agent.Address</MudText>
+                }
+                <MudDivider Class="my-3" />
+                <div class="d-flex justify-space-between">
+                    <MudText Typo="Typo.body2">Ứng viên giới thiệu: <b>@_candidates.Count</b></MudText>
+                    <MudText Typo="Typo.body2">Tổng hoa hồng: <b>@($"{_totalCommission:N0} đ")</b></MudText>
+                </div>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="7">
+            <MudPaper Class="pa-4 mb-4" Elevation="1">
+                <MudText Typo="Typo.subtitle1" Class="mb-3"><b>Ứng viên giới thiệu (@_candidates.Count)</b></MudText>
+                @if (_candidates.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info">Chưa có ứng viên nào do đại lý này giới thiệu.</MudAlert>
+                }
+                else
+                {
+                    <MudHidden Breakpoint="Breakpoint.SmAndDown">
+                        <MudDataGrid T="CandidateRow" Items="_candidates" Hover="true" Dense="true" Striped="true"
+                                     RowClick="@(args => Nav.NavigateTo($"/candidates/{args.Item.Id}"))" Class="cursor-pointer">
+                            <Columns>
+                                <PropertyColumn Property="x => x.Code" Title="Mã" />
+                                <PropertyColumn Property="x => x.FullName" Title="Họ tên" />
+                                <PropertyColumn Property="x => x.Phone" Title="SĐT" />
+                            </Columns>
+                        </MudDataGrid>
+                    </MudHidden>
+
+                    <MudHidden Breakpoint="Breakpoint.SmAndDown" Invert="true">
+                        @foreach (var c in _candidates)
+                        {
+                            <MudPaper Class="mobile-card pa-3" Elevation="0" Style="cursor:pointer" @onclick="@(() => Nav.NavigateTo($"/candidates/{c.Id}"))">
+                                <MudText Typo="Typo.subtitle2" Style="font-weight:600">@c.FullName</MudText>
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">@c.Code • @(string.IsNullOrWhiteSpace(c.Phone) ? "—" : c.Phone)</MudText>
+                            </MudPaper>
+                        }
+                    </MudHidden>
+                }
+            </MudPaper>
+
+            @* Cộng tác viên trực thuộc đại lý *@
+            <MudPaper Class="pa-4 mb-4" Elevation="1">
+                <div class="d-flex justify-space-between align-center mb-3">
+                    <MudText Typo="Typo.subtitle1"><b>Cộng tác viên đang hoạt động (@_collaborators.Count(c => c.IsActive)/@_collaborators.Count)</b></MudText>
+                    @if (_canManageCtv)
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAddAlt" OnClick="@(() => OpenCtvDialog(null))">Thêm CTV</MudButton>
+                    }
+                </div>
+                @if (_collaborators.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true">Đại lý này chưa có cộng tác viên nào.</MudAlert>
+                }
+                else
+                {
+                    @foreach (var c in _collaborators.OrderByDescending(x => x.IsActive).ThenBy(x => x.FullName))
+                    {
+                        <MudPaper Class="mobile-card pa-3 mb-2" Elevation="0">
+                            <div class="d-flex justify-space-between align-center" style="gap:8px">
+                                <div style="min-width:0">
+                                    <span class="chip-clickable" @onclick="@(() => ShowCtv(c.Id))" @onclick:stopPropagation="true">
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Secondary" Variant="Variant.Filled" Icon="@Icons.Material.Filled.Diversity3">CTV-@c.FullName</MudChip>
+                                    </span>
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">@c.Code • @(string.IsNullOrWhiteSpace(c.Phone) ? "—" : c.Phone) • CTV hưởng @($"{c.CommissionSharePercentage:0.#}%")</MudText>
+                                </div>
+                                <div class="d-flex align-center" style="gap:6px">
+                                    <MudChip T="string" Size="Size.Small" Color="@(c.IsActive ? Color.Success : Color.Default)">@(c.IsActive ? "Hoạt động" : "Ngừng")</MudChip>
+                                    @if (_canManageCtv)
+                                    {
+                                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenCtvDialog(c.Id))" />
+                                    }
+                                </div>
+                            </div>
+                        </MudPaper>
+                    }
+                }
+            </MudPaper>
+
+            <MudPaper Class="pa-4 mb-4" Elevation="1">
+                <div class="d-flex justify-space-between align-center mb-3">
+                    <MudText Typo="Typo.subtitle1"><b>Cấu hình hoa hồng (@_configs.Count)</b></MudText>
+                    @if (_canUpdate)
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => OpenConfigDialog(null))">Thêm mốc</MudButton>
+                    }
+                </div>
+                @if (_configs.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true">Chưa cấu hình mốc hoa hồng. Mặc định không tự phát sinh hoa hồng khi chuyển bước.</MudAlert>
+                }
+                else
+                {
+                    <div class="table-scroll-x">
+                        <MudSimpleTable Dense="true" Hover="true" Striped="true">
+                            <thead>
+                                <tr><th>Mốc</th><th>Áp dụng</th><th style="text-align:right">% / Cố định</th><th></th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var cfg in _configs)
+                                {
+                                    <tr>
+                                        <td>@Labels.Vi(cfg.Milestone)</td>
+                                        <td>@(cfg.Country ?? (cfg.JobOrderId is null ? "Mọi đơn / quốc gia" : "Đơn cụ thể"))</td>
+                                        <td style="text-align:right">@(cfg.Percentage.HasValue ? $"{cfg.Percentage.Value:0.#}%" : $"{cfg.FixedAmount:N0} đ")</td>
+                                        <td style="text-align:right">
+                                            @if (_canUpdate)
+                                            {
+                                                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenConfigDialog(cfg))" />
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+                    </div>
+                }
+            </MudPaper>
+
+            <MudPaper Class="pa-4" Elevation="1">
+                <MudText Typo="Typo.subtitle1" Class="mb-3"><b>Hoa hồng (@_commissions.Count)</b></MudText>
+                @if (_commissions.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info">Chưa có hoa hồng phát sinh.</MudAlert>
+                }
+                else
+                {
+                    <MudHidden Breakpoint="Breakpoint.SmAndDown">
+                        <MudDataGrid T="CommissionRow" Items="_commissions" Hover="true" Dense="true" Striped="true">
+                            <Columns>
+                                <PropertyColumn Property="x => x.CandidateName" Title="Ứng viên" />
+                                <TemplateColumn Title="Mốc">
+                                    <CellTemplate>@Labels.Vi(context.Item.Milestone)</CellTemplate>
+                                </TemplateColumn>
+                                <TemplateColumn Title="Hoa hồng">
+                                    <CellTemplate>@($"{context.Item.Amount:N0} đ")</CellTemplate>
+                                </TemplateColumn>
+                                <TemplateColumn Title="Trạng thái">
+                                    <CellTemplate>
+                                        <MudChip T="string" Size="Size.Small" Color="Labels.ColorOf(context.Item.Status)">@Labels.Vi(context.Item.Status)</MudChip>
+                                    </CellTemplate>
+                                </TemplateColumn>
+                                <TemplateColumn Title="" Sortable="false">
+                                    <CellTemplate>
+                                        @if (_canApproveCommission && context.Item.Status == CommissionStatus.Pending)
+                                        {
+                                            <MudButton Size="Size.Small" Color="Color.Info" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Verified" OnClick="@(() => ApproveCommission(context.Item.Id))">Duyệt</MudButton>
+                                        }
+                                        else if (_canPayCommission && context.Item.Status == CommissionStatus.Approved)
+                                        {
+                                            <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Paid" OnClick="@(() => MarkCommissionPaid(context.Item.Id))">Đã chi</MudButton>
+                                        }
+                                    </CellTemplate>
+                                </TemplateColumn>
+                            </Columns>
+                        </MudDataGrid>
+                    </MudHidden>
+
+                    <MudHidden Breakpoint="Breakpoint.SmAndDown" Invert="true">
+                        @foreach (var c in _commissions)
+                        {
+                            <MudPaper Class="mobile-card pa-3" Elevation="0">
+                                <div class="d-flex justify-space-between align-center" style="gap:8px">
+                                    <div style="min-width:0">
+                                        <MudText Typo="Typo.subtitle2" Style="font-weight:600">@c.CandidateName</MudText>
+                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@Labels.Vi(c.Milestone)</MudText>
+                                    </div>
+                                    <MudChip T="string" Size="Size.Small" Color="Labels.ColorOf(c.Status)">@Labels.Vi(c.Status)</MudChip>
+                                </div>
+                                <div class="d-flex justify-space-between align-center mt-1" style="gap:8px">
+                                    <MudText Typo="Typo.body2"><b>@($"{c.Amount:N0} đ")</b></MudText>
+                                    @if (_canApproveCommission && c.Status == CommissionStatus.Pending)
+                                    {
+                                        <MudButton Size="Size.Small" Color="Color.Info" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Verified" OnClick="@(() => ApproveCommission(c.Id))">Duyệt</MudButton>
+                                    }
+                                    else if (_canPayCommission && c.Status == CommissionStatus.Approved)
+                                    {
+                                        <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Paid" OnClick="@(() => MarkCommissionPaid(c.Id))">Đã chi</MudButton>
+                                    }
+                                </div>
+                            </MudPaper>
+                        }
+                    </MudHidden>
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private record CandidateRow(Guid Id, string Code, string FullName, string? Phone);
+    private record CommissionRow(Guid Id, string CandidateName, CommissionMilestone Milestone, decimal Amount, CommissionStatus Status);
+
+    private Agent? _agent;
+    private List<CandidateRow> _candidates = new();
+    private List<CommissionRow> _commissions = new();
+    private decimal _totalCommission;
+    private bool _canUpdate;
+    private bool _canApproveCommission;
+    private bool _canPayCommission;
+    private bool _canManageCtv;
+    private List<AgentCommissionConfig> _configs = new();
+    private List<Collaborator> _collaborators = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var scope = await AgentScope.GetAsync();
+        if (scope.IsPartnerOnly)
+        {
+            Nav.NavigateTo("/agents", replace: true);
+            return;
+        }
+
+        _canUpdate = await HasPermission("agents:update");
+        _canApproveCommission = await HasPermission("commissions:approve");
+        _canPayCommission = await HasPermission("commissions:update");
+        _canManageCtv = await HasPermission("collaborators:create");
+        await Load();
+    }
+
+    private async Task ShowCtv(Guid id)
+    {
+        var parameters = new DialogParameters<CollaboratorInfoDialog> { { x => x.CollaboratorId, id } };
+        await DialogService.ShowAsync<CollaboratorInfoDialog>("Thông tin cộng tác viên", parameters);
+    }
+
+    private async Task OpenCtvDialog(Guid? ctvId)
+    {
+        if (!_canManageCtv) { Snackbar.Add("Bạn không có quyền quản lý cộng tác viên.", Severity.Warning); return; }
+        var parameters = new DialogParameters<CollaboratorDialog>
+        {
+            { x => x.AgentId, Id },
+            { x => x.CollaboratorId, ctvId },
+        };
+        var dialog = await DialogService.ShowAsync<CollaboratorDialog>(ctvId is null ? "Thêm cộng tác viên" : "Sửa cộng tác viên", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+        {
+            Snackbar.Add("Đã lưu cộng tác viên", Severity.Success);
+            await Load();
+        }
+    }
+
+    private async Task ApproveCommission(Guid id)
+    {
+        if (!await HasPermission("commissions:approve")) { Snackbar.Add("Bạn không có quyền duyệt hoa hồng.", Severity.Warning); return; }
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var c = await db.AgentCommissions.FirstOrDefaultAsync(x => x.Id == id);
+        if (c is null) return;
+        var actorId = await AuthStateProvider.GetRequiredUserIdAsync(db);
+        var oldValue = CommissionState(c);
+        c.Status = CommissionStatus.Approved;
+        c.ApprovedBy = actorId;
+        c.UpdatedAt = DateTimeOffset.UtcNow;
+        db.AddAudit(actorId, "approve", "agent_commissions", c.Id, oldValue, CommissionState(c));
+        await db.SaveChangesAsync();
+        Snackbar.Add("Đã duyệt hoa hồng", Severity.Success);
+        await Load();
+    }
+
+    private async Task MarkCommissionPaid(Guid id)
+    {
+        if (!await HasPermission("commissions:update")) { Snackbar.Add("Bạn không có quyền chi hoa hồng.", Severity.Warning); return; }
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var c = await db.AgentCommissions.FirstOrDefaultAsync(x => x.Id == id);
+        if (c is null) return;
+        var actorId = await AuthStateProvider.GetRequiredUserIdAsync(db);
+        var oldValue = CommissionState(c);
+        c.Status = CommissionStatus.Paid;
+        c.PaidDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        c.UpdatedAt = DateTimeOffset.UtcNow;
+        db.AddAudit(actorId, "mark_paid", "agent_commissions", c.Id, oldValue, CommissionState(c));
+        await db.SaveChangesAsync();
+        Snackbar.Add("Đã đánh dấu hoa hồng đã chi", Severity.Success);
+        await Load();
+    }
+
+    private async Task OpenConfigDialog(AgentCommissionConfig? config)
+    {
+        if (!_canUpdate) { Snackbar.Add("Bạn không có quyền cấu hình hoa hồng.", Severity.Warning); return; }
+        var parameters = new DialogParameters<CommissionConfigDialog>
+        {
+            { x => x.AgentId, Id },
+            { x => x.ConfigId, config?.Id },
+        };
+        var dialog = await DialogService.ShowAsync<CommissionConfigDialog>(config is null ? "Thêm cấu hình hoa hồng" : "Sửa cấu hình hoa hồng", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+        {
+            Snackbar.Add("Đã lưu cấu hình hoa hồng", Severity.Success);
+            await Load();
+        }
+    }
+
+    private async Task Load()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _agent = await db.Agents.FirstOrDefaultAsync(a => a.Id == Id);
+        if (_agent is null) return;
+
+        _candidates = await db.Candidates.Where(c => c.AgentId == Id)
+            .OrderBy(c => c.FullName)
+            .Select(c => new CandidateRow(c.Id, c.Code, c.FullName, c.Phone))
+            .ToListAsync();
+
+        var names = await db.Candidates.ToDictionaryAsync(c => c.Id, c => c.FullName);
+        var commissions = await db.AgentCommissions.Where(c => c.AgentId == Id)
+            .OrderByDescending(c => c.CreatedAt).ToListAsync();
+        _commissions = commissions.Select(c => new CommissionRow(
+            c.Id, names.GetValueOrDefault(c.CandidateId, "—"), c.Milestone, c.CommissionAmount, c.Status)).ToList();
+        _totalCommission = commissions.Sum(c => c.CommissionAmount);
+
+        _configs = await db.AgentCommissionConfigs.Where(c => c.AgentId == Id)
+            .OrderBy(c => c.Milestone).ToListAsync();
+
+        _collaborators = await db.Collaborators.Where(c => c.AgentId == Id).ToListAsync();
+    }
+
+    private async Task OpenEdit()
+    {
+        var parameters = new DialogParameters<AgentDialog> { { x => x.AgentId, Id } };
+        var dialog = await DialogService.ShowAsync<AgentDialog>("Sửa đại lý", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+        {
+            Snackbar.Add("Đã cập nhật đại lý", Severity.Success);
+            await Load();
+        }
+    }
+
+    private async Task<bool> HasPermission(string permission)
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var result = await AuthorizationService.AuthorizeAsync(authState.User, null, permission);
+        return result.Succeeded;
+    }
+
+    private static object CommissionState(AgentCommission c) => new
+    {
+        c.Status,
+        c.PaidDate,
+        c.ApprovedBy,
+    };
+
+    private RenderFragment Field(string label, string? value) =>@<MudItem xs="6">
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">@label</MudText>
+        <MudText Typo="Typo.body2">@(string.IsNullOrWhiteSpace(value) ? "—" : value)</MudText>
+    </MudItem>;
+}

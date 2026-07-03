@@ -1,0 +1,29 @@
+﻿@page "/Error"
+@using System.Diagnostics
+
+<PageTitle>Error</PageTitle>
+
+<MudPaper Class="pa-8" Elevation="1">
+    <MudText Typo="Typo.h4" Color="Color.Error"><b>Đã xảy ra lỗi</b></MudText>
+    <MudText Typo="Typo.body1" Class="mt-2 mud-text-secondary">
+        Hệ thống không xử lý được yêu cầu hiện tại. Vui lòng thử lại hoặc liên hệ quản trị viên.
+    </MudText>
+
+    @if (ShowRequestId)
+    {
+        <MudAlert Severity="Severity.Info" Class="mt-4">
+            Mã tra cứu lỗi: <code>@RequestId</code>
+        </MudAlert>
+    }
+</MudPaper>
+
+@code{
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+    private bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+
+    protected override void OnInitialized() =>
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

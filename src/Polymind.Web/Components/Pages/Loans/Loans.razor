@@ -1,0 +1,313 @@
+@page "/loans"
+@attribute [Authorize(Policy = "loans:read")]
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Nav
+@inject IDialogService DialogService
+@inject IAuthorizationService AuthorizationService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject AgentScope AgentScope
+@inject ISnackbar Snackbar
+
+<PageTitle>Hỗ trợ vay — POLYMIND</PageTitle>
+
+<PageHeader Eyebrow="TÀI CHÍNH" Title="Hỗ trợ vay vốn ứng viên" Subtitle="@($"{_rows.Count} khoản vay • {_disbursedCount} đã giải ngân")">
+    <Actions>
+        @if (_canUpdate)
+        {
+            <MudButton Class="entity-action-button" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate">
+                Thêm khoản vay
+            </MudButton>
+        }
+    </Actions>
+</PageHeader>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    @* Thẻ tổng quan theo tình trạng *@
+    <MudGrid Class="mb-4">
+        <MudItem xs="6" md="3">
+            <MudPaper Class="pa-3" Elevation="1">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Đang vay</MudText>
+                <MudText Typo="Typo.h5" Color="Color.Warning"><b>@_borrowingCount</b></MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudPaper Class="pa-3" Elevation="1">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Đã giải ngân</MudText>
+                <MudText Typo="Typo.h5" Color="Color.Info"><b>@_disbursedCount</b></MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudPaper Class="pa-3" Elevation="1">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Đã tất toán</MudText>
+                <MudText Typo="Typo.h5" Color="Color.Success"><b>@_settledCount</b></MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudPaper Class="pa-3" Elevation="1">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Tổng đã giải ngân</MudText>
+                <MudText Typo="Typo.h6" Color="Color.Success"><b>@($"{_disbursedAmount:N0} đ")</b></MudText>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <MudPaper Class="pa-4" Elevation="1">
+        <MudGrid Class="mb-3 align-center">
+            <MudItem xs="12" md="5">
+                <MudTextField @bind-Value="_search" Placeholder="Tìm tên, mã, ngân hàng..." Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudSelect T="LoanStatus?" @bind-Value="_statusFilter" Label="Lọc theo tình trạng" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                    <MudSelectItem T="LoanStatus?" Value="@((LoanStatus?)null)">Tất cả</MudSelectItem>
+                    @foreach (var s in LoanStatusOptions)
+                    {
+                        <MudSelectItem T="LoanStatus?" Value="@s">@Labels.Vi(s)</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+        </MudGrid>
+
+        @if (!Filtered.Any())
+        {
+            <MudAlert Severity="Severity.Info" Dense="true">
+                Chưa có khoản vay phù hợp. Bấm <b>Thêm khoản vay</b> để tạo hồ sơ vay cho ứng viên hiện có.
+            </MudAlert>
+        }
+        else
+        {
+            <MudHidden Breakpoint="Breakpoint.SmAndDown">
+                <div class="table-scroll-x">
+                    <MudSimpleTable Dense="true" Hover="true" Striped="true">
+                        <thead>
+                            <tr>
+                                <th>Ứng viên</th>
+                                <th>Tình trạng</th>
+                                <th style="text-align:right">Số tiền</th>
+                                <th style="text-align:center">Thời hạn</th>
+                                <th>Ngân hàng</th>
+                                <th>Ngày giải ngân</th>
+                                <th style="text-align:right">Thao tác</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var r in Filtered)
+                            {
+                                <tr style="cursor:pointer" @onclick="@(() => Nav.NavigateTo($"/candidates/{r.CandidateId}"))">
+                                    <td><b>@r.CandidateName</b><MudText Typo="Typo.caption" Class="mud-text-secondary d-block">@r.Code</MudText></td>
+                                    <td>
+                                        <MudChip T="string" Size="Size.Small" Color="Labels.ColorOf(r.Status)" Icon="@Labels.IconOf(r.Status)">@Labels.Vi(r.Status)</MudChip>
+                                    </td>
+                                    <td style="text-align:right">@(r.Amount is null ? "—" : $"{r.Amount:N0} đ")</td>
+                                    <td style="text-align:center">@(r.TermMonths is null ? "—" : $"{r.TermMonths} tháng")</td>
+                                    <td>@(string.IsNullOrWhiteSpace(r.BankName) ? "—" : r.BankName)</td>
+                                    <td>@(r.DisbursedDate?.ToString("dd/MM/yyyy") ?? "—")</td>
+                                    <td style="text-align:right" @onclick:stopPropagation="true">
+                                        <div class="d-inline-flex flex-wrap justify-end" style="gap:6px">
+                                            @if (_canUpdate)
+                                            {
+                                                <MudButton Class="entity-action-button" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Edit"
+                                                           OnClick="@(() => OpenEdit(r.CandidateId))">Sửa</MudButton>
+                                            }
+                                            @if (_canDelete)
+                                            {
+                                                <MudButton Class="entity-action-button" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete"
+                                                           OnClick="@(() => DeleteLoan(r))">Xóa</MudButton>
+                                            }
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                </div>
+            </MudHidden>
+
+            <MudHidden Breakpoint="Breakpoint.SmAndDown" Invert="true">
+                @foreach (var r in Filtered)
+                {
+                    <MudPaper Class="mobile-card pa-3" Elevation="0">
+                        <div class="d-flex justify-space-between align-center" style="gap:8px">
+                            <div style="min-width:0;cursor:pointer" @onclick="@(() => Nav.NavigateTo($"/candidates/{r.CandidateId}"))">
+                                <MudText Typo="Typo.subtitle2" Style="font-weight:600">@r.CandidateName</MudText>
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">@r.Code</MudText>
+                            </div>
+                            <MudChip T="string" Size="Size.Small" Color="Labels.ColorOf(r.Status)" Icon="@Labels.IconOf(r.Status)">@Labels.Vi(r.Status)</MudChip>
+                        </div>
+                        <div class="d-flex justify-space-between align-center mt-1" style="gap:8px">
+                            <MudText Typo="Typo.body2">
+                                @(r.Amount is null ? "—" : $"{r.Amount:N0} đ")
+                                @if (r.TermMonths is not null) { <span class="mud-text-secondary"> • @r.TermMonths tháng</span> }
+                            </MudText>
+                            @if (_canUpdate)
+                            {
+                                <MudButton Class="entity-action-button" Size="Size.Small" Variant="Variant.Text" Color="Color.Primary" OnClick="@(() => OpenEdit(r.CandidateId))">Sửa</MudButton>
+                            }
+                            @if (_canDelete)
+                            {
+                                <MudButton Class="entity-action-button" Size="Size.Small" Variant="Variant.Text" Color="Color.Error" OnClick="@(() => DeleteLoan(r))">Xóa</MudButton>
+                            }
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(r.BankName))
+                        {
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">@r.BankName</MudText>
+                        }
+                    </MudPaper>
+                }
+            </MudHidden>
+        }
+    </MudPaper>
+}
+
+@code {
+    private record LoanRow(Guid CandidateId, string CandidateName, string Code, LoanStatus Status,
+        decimal? Amount, int? TermMonths, string? BankName, DateOnly? DisbursedDate);
+
+    private static readonly LoanStatus[] LoanStatusOptions = { LoanStatus.Borrowing, LoanStatus.Disbursed, LoanStatus.Settled };
+
+    private List<LoanRow> _rows = new();
+    private bool _loading = true;
+    private bool _canUpdate;
+    private bool _canDelete;
+    private string _search = "";
+    private LoanStatus? _statusFilter;
+
+    private int _borrowingCount;
+    private int _disbursedCount;
+    private int _settledCount;
+    private decimal _disbursedAmount;
+
+    private IEnumerable<LoanRow> Filtered => _rows.Where(r =>
+        (_statusFilter is null || r.Status == _statusFilter)
+        && (string.IsNullOrWhiteSpace(_search)
+            || r.CandidateName.Contains(_search, StringComparison.OrdinalIgnoreCase)
+            || r.Code.Contains(_search, StringComparison.OrdinalIgnoreCase)
+            || (r.BankName?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)));
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        _canUpdate = await HasPermission("loans:update") && BusinessRoleAccess.CanEditLoan(authState.User);
+        _canDelete = await HasPermission("loans:delete") && BusinessRoleAccess.CanDeleteLoan(authState.User);
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        _loading = true;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var scope = await AgentScope.GetAsync();
+
+        var loanQuery = db.Loans.AsNoTracking();
+        if (scope.IsAgentOnly)
+            loanQuery = loanQuery.Where(l => db.Candidates.Any(c => c.Id == l.CandidateId && c.AgentId == scope.AgentId));
+
+        var loans = await loanQuery.ToListAsync();
+        var latestLoans = loans
+            .GroupBy(l => l.CandidateId)
+            .Select(g => g.OrderByDescending(l => l.CreatedAt).First())
+            .ToList();
+        var candidateIds = latestLoans.Select(l => l.CandidateId).ToList();
+        var candidates = await db.Candidates.AsNoTracking()
+            .Where(c => candidateIds.Contains(c.Id))
+            .Select(c => new { c.Id, c.FullName, c.Code })
+            .ToDictionaryAsync(c => c.Id);
+
+        _rows = latestLoans
+            .Where(l => candidates.ContainsKey(l.CandidateId))
+            .Select(l =>
+            {
+                var c = candidates[l.CandidateId];
+                return new LoanRow(
+                    c.Id,
+                    c.FullName,
+                    c.Code,
+                    l.Status == LoanStatus.NotBorrowed ? LoanStatus.Borrowing : l.Status,
+                    l.Amount,
+                    l.TermMonths,
+                    l.BankName,
+                    l.DisbursedDate);
+            })
+            .OrderBy(r => r.CandidateName)
+            .ToList();
+
+        _borrowingCount = _rows.Count(r => r.Status == LoanStatus.Borrowing);
+        _disbursedCount = _rows.Count(r => r.Status == LoanStatus.Disbursed);
+        _settledCount = _rows.Count(r => r.Status == LoanStatus.Settled);
+        _disbursedAmount = _rows.Where(r => r.Status is LoanStatus.Disbursed or LoanStatus.Settled).Sum(r => r.Amount ?? 0m);
+
+        _loading = false;
+    }
+
+    private async Task OpenCreate()
+    {
+        if (!_canUpdate) return;
+        var dialog = await DialogService.ShowAsync<LoanDialog>("Thêm khoản vay");
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+            await Load();
+    }
+
+    private async Task OpenEdit(Guid candidateId)
+    {
+        if (!_canUpdate) return;
+        var parameters = new DialogParameters<LoanDialog> { { x => x.CandidateId, candidateId } };
+        var dialog = await DialogService.ShowAsync<LoanDialog>("Hồ sơ hỗ trợ vay", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+            await Load();
+    }
+
+    private async Task DeleteLoan(LoanRow row)
+    {
+        if (!_canDelete) return;
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (!await HasPermission("loans:delete") || !BusinessRoleAccess.CanDeleteLoan(authState.User))
+        {
+            Snackbar.Add("Bạn không có quyền xóa khoản vay.", Severity.Warning);
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "Xóa khoản vay?",
+            $"Xóa hồ sơ vay vốn của ứng viên \"{row.CandidateName}\". Bạn có chắc chắn?",
+            yesText: "Xóa",
+            cancelText: "Hủy");
+        if (confirm != true) return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var scope = await AgentScope.GetAsync();
+        if (scope.IsAgentOnly && !await db.Candidates.AnyAsync(c => c.Id == row.CandidateId && c.AgentId == scope.AgentId))
+        {
+            Snackbar.Add("Bạn không có quyền xóa khoản vay của ứng viên này.", Severity.Warning);
+            return;
+        }
+
+        var loans = await db.Loans.Where(l => l.CandidateId == row.CandidateId).ToListAsync();
+        if (loans.Count == 0)
+        {
+            Snackbar.Add("Khoản vay này không còn tồn tại.", Severity.Info);
+            await Load();
+            return;
+        }
+
+        var actorId = await AuthStateProvider.GetRequiredUserIdAsync(db);
+        db.AddAudit(actorId, "delete", "loans", loans.OrderByDescending(l => l.CreatedAt).First().Id,
+            loans.Select(l => new { l.Code, l.CandidateId, l.Status, l.Amount, l.BankName }).ToList(), null);
+        db.Loans.RemoveRange(loans);
+        await db.SaveChangesAsync();
+        Snackbar.Add("Đã xóa khoản vay.", Severity.Success);
+        await Load();
+    }
+
+    private async Task<bool> HasPermission(string permission)
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var result = await AuthorizationService.AuthorizeAsync(authState.User, null, permission);
+        return result.Succeeded;
+    }
+}

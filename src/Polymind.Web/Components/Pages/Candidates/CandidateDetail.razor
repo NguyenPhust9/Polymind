@@ -1,0 +1,1813 @@
+@page "/candidates/{Id:guid}"
+@attribute [Authorize(Policy = "candidates:read")]
+@using Polymind.Web.Components.Pages.Loans
+@using Polymind.Web.Components.Pages.Ai
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Nav
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject IAuthorizationService AuthorizationService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IDocumentStorage DocumentStorage
+@inject AgentScope AgentScope
+
+<PageTitle>Chi tiết Ứng viên — POLYMIND</PageTitle>
+
+@if (_accessDenied)
+{
+    <MudButton StartIcon="@Icons.Material.Filled.ArrowBack" Class="mb-3" OnClick="@(() => Nav.NavigateTo("/candidates"))">Quay lại</MudButton>
+    <MudAlert Severity="Severity.Error">Bạn không có quyền xem ứng viên này (chỉ xem được ứng viên do mình giới thiệu).</MudAlert>
+}
+else if (_candidate is null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <div class="d-flex justify-space-between align-center mb-3">
+        <MudButton StartIcon="@Icons.Material.Filled.ArrowBack" OnClick="@(() => Nav.NavigateTo("/candidates"))">Quay lại</MudButton>
+        <div class="d-flex flex-wrap" style="gap:8px">
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="OpenAiAnalysis">Phân tích AI</MudButton>
+            @if (_canEditCandidateProfile)
+            {
+                <MudButton Class="entity-action-button" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Edit" OnClick="OpenEdit">Sửa thông tin</MudButton>
+            }
+            @if (_canDeleteCandidate)
+            {
+                <MudButton Class="entity-action-button" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteCandidate" Disabled="_busy">
+                    Xóa
+                </MudButton>
+            }
+        </div>
+    </div>
+
+    @* ===== Card nổi bật: Người phụ trách ứng viên (TVV + CTV) — bấm để xem chi tiết ===== *@
+    <MudPaper Class="pa-4 mb-4 people-card" Elevation="3">
+        <div class="d-flex align-center mb-3" style="gap:8px">
+            <MudIcon Icon="@Icons.Material.Filled.SupportAgent" Color="Color.Secondary" />
+            <MudText Typo="Typo.subtitle1"><b>Người phụ trách ứng viên</b></MudText>
+        </div>
+        <MudGrid>
+            <MudItem xs="12" sm="6">
+                @if (_consultantId is not null)
+                {
+                    <div class="person-tile" @onclick="@(() => ShowConsultant(_consultantId.Value))">
+                        <MudAvatar Color="Color.Secondary" Size="Size.Large">@Initials(_consultantName)</MudAvatar>
+                        <div style="min-width:0">
+                            <MudChip T="string" Size="Size.Small" Color="Color.Secondary" Variant="Variant.Outlined" Class="mb-1">Tư vấn viên</MudChip>
+                            <MudText Typo="Typo.h6" Class="person-name"><b>@_consultantName</b></MudText>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">Bấm để xem thông tin liên lạc</MudText>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="person-tile person-empty">
+                        <MudAvatar Color="Color.Default" Size="Size.Large"><MudIcon Icon="@Icons.Material.Filled.PersonOff" /></MudAvatar>
+                        <div>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Secondary" Variant="Variant.Outlined" Class="mb-1">Tư vấn viên</MudChip>
+                            <MudText Typo="Typo.body1" Class="mud-text-secondary">Chưa gắn tư vấn viên</MudText>
+                        </div>
+                    </div>
+                }
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                @if (_collaboratorId is not null)
+                {
+                    <div class="person-tile" @onclick="@(() => ShowCollaborator(_collaboratorId.Value))">
+                        <MudAvatar Color="Color.Primary" Size="Size.Large">@Initials(_collaboratorName)</MudAvatar>
+                        <div style="min-width:0">
+                            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined" Class="mb-1">Cộng tác viên (nguồn giới thiệu)</MudChip>
+                            <MudText Typo="Typo.h6" Class="person-name"><b>@_collaboratorName</b></MudText>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">Bấm để xem thông tin liên lạc</MudText>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="person-tile person-empty">
+                        <MudAvatar Color="Color.Default" Size="Size.Large"><MudIcon Icon="@Icons.Material.Filled.PersonOff" /></MudAvatar>
+                        <div>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined" Class="mb-1">Cộng tác viên (nguồn giới thiệu)</MudChip>
+                            <MudText Typo="Typo.body1" Class="mud-text-secondary">Không qua cộng tác viên</MudText>
+                        </div>
+                    </div>
+                }
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    <MudGrid>
+        <MudItem xs="12" md="5">
+            <MudPaper Class="pa-4 mb-4" Elevation="1">
+                <div class="d-flex align-center mb-3">
+                    <MudAvatar Color="Color.Primary" Size="Size.Large" Class="mr-3">@_candidate.FullName[..1]</MudAvatar>
+                    <div>
+                        <MudText Typo="Typo.h6"><b>@_candidate.FullName</b></MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@_candidate.Code</MudText>
+                    </div>
+                </div>
+                <MudDivider Class="mb-3" />
+
+                <MudText Typo="Typo.subtitle2" Class="mb-2"><b>Thông tin cá nhân</b></MudText>
+                <MudGrid>
+                    @Field("Số điện thoại", _candidate.Phone)
+                    @Field("Giới tính", _candidate.Gender is null ? null : Labels.Vi(_candidate.Gender.Value))
+                    @Field("Ngày sinh", _candidate.Dob?.ToString("dd/MM/yyyy"))
+                    @Field("Hôn nhân", _candidate.MaritalStatus is null ? null : Labels.Vi(_candidate.MaritalStatus.Value))
+                    @Field("Tỉnh/Thành", _candidate.Province)
+                    @Field("Đơn hàng", _country)
+                </MudGrid>
+                @if (!string.IsNullOrWhiteSpace(_candidate.Address))
+                {
+                    <MudText Typo="Typo.body2" Class="mt-2"><b>Địa chỉ:</b> @_candidate.Address</MudText>
+                }
+
+                <MudDivider Class="my-3" />
+                <MudText Typo="Typo.subtitle2" Class="mb-2"><b>Giấy tờ</b></MudText>
+                <MudGrid>
+                    @Field("Số CCCD", _candidate.CccdNumber)
+                    @Field("Ngày cấp", _candidate.CccdIssueDate?.ToString("dd/MM/yyyy"))
+                    @Field("Nơi cấp", _candidate.CccdIssuePlace)
+                    @Field("Số hộ chiếu", _candidate.PassportNumber)
+                    @Field("HC hết hạn", _candidate.PassportExpiry?.ToString("dd/MM/yyyy"))
+                </MudGrid>
+
+                @if (HasEmergencyInfo)
+                {
+                    <MudDivider Class="my-3" />
+                    <MudText Typo="Typo.subtitle2" Class="mb-2"><b>Liên hệ khẩn cấp</b></MudText>
+                    <MudGrid>
+                        @Field("Người liên hệ", _candidate.EmergencyContactName)
+                        @Field("SĐT", _candidate.EmergencyContactPhone)
+                        @Field("Quan hệ", _candidate.EmergencyContactRelation)
+                    </MudGrid>
+                }
+
+                @if (HasGuardianInfo)
+                {
+                    <MudDivider Class="my-3" />
+                    <div class="d-flex align-center mb-2" style="gap:6px">
+                        <MudIcon Icon="@Icons.Material.Filled.FamilyRestroom" Size="Size.Small" Color="Color.Primary" />
+                        <MudText Typo="Typo.subtitle2"><b>Cha/Mẹ/Người bảo hộ</b></MudText>
+                    </div>
+                    <MudGrid>
+                        @Field("Họ tên", _candidate.GuardianName)
+                        @Field("Quan hệ", _candidate.GuardianRelation)
+                        @Field("SĐT", _candidate.GuardianPhone)
+                        @Field("CCCD", _candidate.GuardianCccd)
+                        @Field("Nghề nghiệp", _candidate.GuardianOccupation)
+                    </MudGrid>
+                    @if (!string.IsNullOrWhiteSpace(_candidate.GuardianAddress))
+                    {
+                        <MudText Typo="Typo.body2" Class="mt-2"><b>Địa chỉ:</b> @_candidate.GuardianAddress</MudText>
+                    }
+                }
+
+                @if (HasBankInfo)
+                {
+                    <MudDivider Class="my-3" />
+                    <MudText Typo="Typo.subtitle2" Class="mb-2"><b>Ngân hàng</b></MudText>
+                    <MudGrid>
+                        @Field("Số TK", _candidate.BankAccountNumber)
+                        @Field("Ngân hàng", _candidate.BankName)
+                        @Field("Chủ TK", _candidate.BankAccountName)
+                    </MudGrid>
+                }
+
+                @* Thông tin nhạy cảm — chỉ super_admin được xem *@
+                <AuthorizeView Roles="super_admin">
+                    <Authorized>
+                        <MudDivider Class="my-3" />
+                        <div class="d-flex align-center mb-2" style="gap:6px">
+                            <MudIcon Icon="@Icons.Material.Filled.Lock" Size="Size.Small" Color="Color.Warning" />
+                            <MudText Typo="Typo.subtitle2"><b>Hồ sơ & nguyện vọng (chỉ super admin)</b></MudText>
+                        </div>
+                        <MudGrid>
+                            @Field("Email", _candidate.Email)
+                            @Field("Nghề nghiệp", _candidate.Occupation)
+                            @Field("Trình độ học vấn", _candidate.EducationLevel)
+                            @Field("Kinh nghiệm làm việc", _candidate.WorkExperience)
+                            @Field("Ngoại ngữ", _candidate.Languages)
+                        </MudGrid>
+                    </Authorized>
+                </AuthorizeView>
+            </MudPaper>
+
+            @if (_cjo is not null && _cjo.CurrentStep >= WorkflowStep.Completed)
+            {
+                <MudAlert Severity="Severity.Success" Class="mb-4">Ứng viên đã hoàn thành toàn bộ quy trình 20 bước 🎉</MudAlert>
+            }
+            else if (_cjo is not null)
+            {
+                <MudPaper Class="pa-4 mb-4" Elevation="1">
+                    <MudText Typo="Typo.subtitle1" Class="mb-1"><b>Bước hiện tại</b></MudText>
+                    <MudChip T="string" Color="@(_cjo.CurrentStep == WorkflowStep.ReselectJobOrder ? Color.Warning : Color.Primary)" Class="mb-3">
+                        @($"{WorkflowSteps.No(_cjo.CurrentStep)}. {Labels.Vi(_cjo.CurrentStep)}")
+                    </MudChip>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-3">Phụ trách: @_workflowOwnerLabel</MudText>
+                    @if (!_canAdvanceWorkflow)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true">
+                            Tài khoản này chỉ được xem tiến trình ở bước hiện tại.
+                        </MudAlert>
+                    }
+                    else if (_cjo.CurrentStep == WorkflowStep.EntranceExam)
+                    {
+                        @* B8: chọn 1 trong 3 tình huống theo đơn hàng; đậu → B9, rớt → lùi về 7.5 *@
+                        <MudText Typo="Typo.body2" Class="mb-1"><b>Tình huống xét tuyển</b> (chọn 1 theo đơn hàng)</MudText>
+                        <MudRadioGroup T="string" @bind-Value="_examMode">
+                            <MudRadio T="string" Value="@("Thi tuyển")" Dense="true">Thi tuyển (đậu/rớt theo bằng cấp, chứng chỉ)</MudRadio>
+                            <MudRadio T="string" Value="@("Phỏng vấn")" Dense="true">Phỏng vấn (đậu/rớt do chủ sử dụng)</MudRadio>
+                            <MudRadio T="string" Value="@("Xét duyệt hồ sơ")" Dense="true">Xét duyệt hồ sơ (chủ tự duyệt, không phỏng vấn)</MudRadio>
+                        </MudRadioGroup>
+                        <MudButton Variant="Variant.Filled" Color="Color.Success" FullWidth="true" Class="mt-2"
+                                   StartIcon="@Icons.Material.Filled.ThumbUp" OnClick="AdvanceStep"
+                                   Disabled="@(_busy || string.IsNullOrEmpty(_examMode))">
+                            Đậu — chuyển bước Trúng tuyển
+                        </MudButton>
+                        <MudDivider Class="my-3" />
+                        <MudTextField @bind-Value="_failNotes" Label="Lý do rớt / từ chối (nếu có)" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" Class="mb-2" />
+                        <MudButton Variant="Variant.Outlined" Color="Color.Error" FullWidth="true"
+                                   StartIcon="@Icons.Material.Filled.ThumbDown" OnClick="FailEntranceExam"
+                                   Disabled="@(_busy || string.IsNullOrEmpty(_examMode))">
+                            Rớt / Chủ từ chối — về bước 7.5 chọn lại đơn khác
+                        </MudButton>
+                    }
+                    else if (_cjo.CurrentStep == WorkflowStep.ReselectJobOrder)
+                    {
+                        @* B7.5: bắt buộc gắn đơn hàng MỚI mới được sang B8 (giữ nguyên hồ sơ) *@
+                        @if (!string.IsNullOrWhiteSpace(_lastFailNote))
+                        {
+                            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2">@_lastFailNote</MudAlert>
+                        }
+                        <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                            Ứng viên rớt bước 8 — phải gắn <b>đơn hàng mới</b> (khác đơn cũ) mới được chuyển sang bước 8. Hồ sơ ứng viên được giữ nguyên.
+                        </MudAlert>
+                        @if (_reassignJobOrders.Count == 0)
+                        {
+                            <MudAlert Severity="Severity.Info" Dense="true">Chưa có đơn hàng khác còn hạn để gắn.</MudAlert>
+                        }
+                        else
+                        {
+                            <MudSelect T="Guid?" @bind-Value="_reassignJobOrderId" Label="Đơn hàng mới" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2">
+                                @foreach (var j in _reassignJobOrders)
+                                {
+                                    <MudSelectItem T="Guid?" Value="@j.Id">@j.Code — @j.Country (@j.CompanyName)</MudSelectItem>
+                                }
+                            </MudSelect>
+                            <MudTextField @bind-Value="_reassignNotes" Label="Ghi chú" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" Class="mb-2" />
+                            <MudButton Variant="Variant.Filled" Color="Color.Success" FullWidth="true"
+                                       StartIcon="@Icons.Material.Filled.Link" OnClick="ReassignJobOrder"
+                                       Disabled="@(_busy || _reassignJobOrderId is null)">
+                                Gắn đơn hàng mới & sang bước 8
+                            </MudButton>
+                        }
+                    }
+                    else if (_cjo.CurrentStep == WorkflowStep.Orientation)
+                    {
+                        @* B10: chọn được NHIỀU nội dung học, hoặc bỏ qua ("nếu cần") *@
+                        <MudText Typo="Typo.body2" Class="mb-1"><b>Nội dung đào tạo</b> (chọn nhiều theo yêu cầu đơn hàng)</MudText>
+                        <MudCheckBox T="bool" @bind-Value="_learnLanguage" Dense="true" Disabled="_skipTraining" Label="Học tiếng" />
+                        <MudCheckBox T="bool" @bind-Value="_learnOrientation" Dense="true" Disabled="_skipTraining" Label="Học định hướng" />
+                        <MudCheckBox T="bool" @bind-Value="_learnVocational" Dense="true" Disabled="_skipTraining" Label="Học nghề" />
+                        <MudSwitch T="bool" @bind-Value="_skipTraining" Color="Color.Warning" Label="Bỏ qua — đơn hàng không yêu cầu học" />
+                        <MudButton Variant="Variant.Filled" Color="Color.Success" FullWidth="true" Class="mt-2"
+                                   StartIcon="@Icons.Material.Filled.ArrowForward" OnClick="AdvanceStep"
+                                   Disabled="@(_busy || (!_skipTraining && !_learnLanguage && !_learnOrientation && !_learnVocational))">
+                            @(_skipTraining ? "Bỏ qua & chuyển bước tiếp theo" : "Hoàn thành & chuyển bước tiếp theo")
+                        </MudButton>
+                    }
+                    else if (_cjo.CurrentStep == WorkflowStep.FullPayment)
+                    {
+                        @* B15: chọn 1 trong 2 — thanh toán hoàn tất hoặc cam kết trả nợ (liên kết module vay) *@
+                        <MudText Typo="Typo.body2" Class="mb-1"><b>Hình thức hoàn tất tài chính</b> (chọn 1)</MudText>
+                        <MudRadioGroup T="string" @bind-Value="_paymentMode">
+                            <MudRadio T="string" Value="@("Thanh toán hoàn tất")" Dense="true">Thanh toán hoàn tất</MudRadio>
+                            <MudRadio T="string" Value="@("Cam kết trả nợ")" Dense="true">Cam kết trả nợ (có vay vốn)</MudRadio>
+                        </MudRadioGroup>
+                        @if (_paymentMode == "Cam kết trả nợ" && !_hasLoan)
+                        {
+                            <MudAlert Severity="Severity.Warning" Dense="true" Class="my-2">
+                                Ứng viên chưa có hồ sơ vay — tạo khoản vay ở thẻ <b>Hỗ trợ vay vốn</b> bên dưới trước khi chuyển bước.
+                            </MudAlert>
+                        }
+                        <MudButton Variant="Variant.Filled" Color="Color.Success" FullWidth="true" Class="mt-2"
+                                   StartIcon="@Icons.Material.Filled.ArrowForward" OnClick="AdvanceStep"
+                                   Disabled="@(_busy || string.IsNullOrEmpty(_paymentMode) || (_paymentMode == "Cam kết trả nợ" && !_hasLoan))">
+                            Hoàn thành & chuyển bước tiếp theo
+                        </MudButton>
+                    }
+                    else if (_cjo.CurrentStep == WorkflowStep.OverseasSupport)
+                    {
+                        @* B19 → B20: chỉ khi hết nghĩa vụ (vay đã tất toán / không vay), xác nhận thủ công *@
+                        @if (_hasOpenLoan)
+                        {
+                            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">
+                                Khoản vay của ứng viên chưa <b>tất toán</b> (đang: @Labels.Vi(_loanStatus)) — chưa thể hoàn thành quy trình.
+                                Khi trả xong nợ, cập nhật khoản vay sang "Đã tất toán" ở thẻ Hỗ trợ vay vốn.
+                            </MudAlert>
+                        }
+                        else
+                        {
+                            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+                                Chỉ xác nhận khi ứng viên không còn nghĩa vụ mở: nợ vay đã tất toán (hoặc không vay), không còn hỗ trợ lấy lại thuế / tái tuyển việc đang xử lý.
+                            </MudAlert>
+                        }
+                        <MudButton Variant="Variant.Filled" Color="Color.Success" FullWidth="true"
+                                   StartIcon="@Icons.Material.Filled.Verified" OnClick="AdvanceStep" Disabled="@(_busy || _hasOpenLoan)">
+                            Xác nhận hoàn thành quy trình (bước 20)
+                        </MudButton>
+                    }
+                    else
+                    {
+                        <MudButton Variant="Variant.Filled" Color="Color.Success" FullWidth="true"
+                                   StartIcon="@Icons.Material.Filled.ArrowForward" OnClick="AdvanceStep" Disabled="_busy">
+                            Hoàn thành & chuyển bước tiếp theo
+                        </MudButton>
+                    }
+                </MudPaper>
+            }
+
+            @if (_cjo is null && _canAssignJobOrder)
+            {
+                <MudPaper Class="pa-4" Elevation="1">
+                    <MudText Typo="Typo.subtitle1" Class="mb-1"><b>Gắn vào đơn hàng</b></MudText>
+                    <MudText Typo="Typo.body2" Class="mb-3 mud-text-secondary">Chọn đơn hàng để bắt đầu quy trình 20 bước cho ứng viên.</MudText>
+                    @if (_jobOrders.Count == 0)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true">Chưa có đơn hàng nào để gắn.</MudAlert>
+                    }
+                    else
+                    {
+                        <MudSelect T="Guid?" @bind-Value="_selectedJobOrderId" Label="Đơn hàng" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2">
+                            @foreach (var j in _jobOrders)
+                            {
+                                <MudSelectItem T="Guid?" Value="@j.Id">@j.Code — @j.Country (@j.CompanyName)</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudTextField @bind-Value="_assignNotes" Label="Ghi chú" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" Class="mb-2" />
+                        <MudButton Variant="Variant.Filled" Color="Color.Success" FullWidth="true"
+                                   StartIcon="@Icons.Material.Filled.Link" OnClick="AssignJobOrder" Disabled="_busy || _selectedJobOrderId is null">
+                            Gắn vào đơn hàng
+                        </MudButton>
+                    }
+                </MudPaper>
+            }
+
+            @if (CanShowCandidateDebt)
+            {
+                <MudPaper Class="pa-4 mt-4" Elevation="1">
+                    <MudText Typo="Typo.subtitle1" Class="mb-3"><b>Công nợ ứng viên</b></MudText>
+                    <MudGrid Class="mb-2">
+                        <MudItem xs="4">
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">Phải thu</MudText>
+                            <MudText Typo="Typo.body1"><b>@($"{_paymentTotal:N0} đ")</b></MudText>
+                        </MudItem>
+                        <MudItem xs="4">
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">Đã thu</MudText>
+                            <MudText Typo="Typo.body1" Color="Color.Success"><b>@($"{_paymentPaid:N0} đ")</b></MudText>
+                        </MudItem>
+                        <MudItem xs="4">
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">Còn nợ</MudText>
+                            <MudText Typo="Typo.body1" Color="@(_paymentOutstanding > 0 ? Color.Warning : Color.Success)"><b>@($"{_paymentOutstanding:N0} đ")</b></MudText>
+                        </MudItem>
+                    </MudGrid>
+                    @if (_overduePaymentCount > 0)
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">
+                            Có @_overduePaymentCount khoản quá hạn/chưa thu đủ.
+                        </MudAlert>
+                    }
+                    @if (_payments.Count == 0)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true">Chưa có khoản thu nào cho ứng viên này.</MudAlert>
+                    }
+                    else
+                    {
+                        <MudHidden Breakpoint="Breakpoint.SmAndDown">
+                            <div class="table-scroll-x">
+                                <MudSimpleTable Dense="true" Hover="true" Striped="true">
+                                    <thead>
+                                        <tr>
+                                            <th>Mã</th>
+                                            <th>Loại</th>
+                                            <th style="text-align:right">Số tiền</th>
+                                            <th>Trạng thái</th>
+                                            <th>Hạn thu</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var payment in _payments)
+                                        {
+                                            <tr>
+                                                <td>@payment.Code</td>
+                                                <td>@Labels.Vi(payment.Type)</td>
+                                                <td style="text-align:right">@($"{payment.Amount:N0} đ")</td>
+                                                <td><MudChip T="string" Size="Size.Small" Color="Labels.ColorOf(payment.Status)">@Labels.Vi(payment.Status)</MudChip></td>
+                                                <td>@(payment.DueDate?.ToString("dd/MM/yyyy") ?? "—")</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </MudSimpleTable>
+                            </div>
+                        </MudHidden>
+
+                        <MudHidden Breakpoint="Breakpoint.SmAndDown" Invert="true">
+                            @foreach (var payment in _payments)
+                            {
+                                <MudPaper Class="mobile-card pa-3" Elevation="0">
+                                    <div class="d-flex justify-space-between align-center" style="gap:8px">
+                                        <div style="min-width:0">
+                                            <MudText Typo="Typo.subtitle2" Style="font-weight:600">@Labels.Vi(payment.Type)</MudText>
+                                            <MudText Typo="Typo.caption" Class="mud-text-secondary">@payment.Code</MudText>
+                                        </div>
+                                        <MudChip T="string" Size="Size.Small" Color="Labels.ColorOf(payment.Status)">@Labels.Vi(payment.Status)</MudChip>
+                                    </div>
+                                    <div class="d-flex justify-space-between align-center mt-1" style="gap:8px">
+                                        <MudText Typo="Typo.body2"><b>@($"{payment.Amount:N0} đ")</b></MudText>
+                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">Hạn: @(payment.DueDate?.ToString("dd/MM/yyyy") ?? "—")</MudText>
+                                    </div>
+                                </MudPaper>
+                            }
+                        </MudHidden>
+                    }
+                </MudPaper>
+            }
+
+            @if (_canReadLoan)
+            {
+                <MudPaper Class="pa-4 mt-4" Elevation="1">
+                    <div class="d-flex justify-space-between align-center mb-3">
+                        <div class="d-flex align-center" style="gap:8px">
+                            <MudIcon Icon="@Icons.Material.Filled.AccountBalance" Color="Color.Primary" />
+                            <MudText Typo="Typo.subtitle1"><b>Hỗ trợ vay vốn</b></MudText>
+                        </div>
+                        @if (_hasLoan)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Labels.ColorOf(_loanStatus)" Icon="@Labels.IconOf(_loanStatus)">@Labels.Vi(_loanStatus)</MudChip>
+                        }
+                    </div>
+                    @if (_hasLoan)
+                    {
+                        <MudGrid>
+                            @Field("Số tiền vay", _loanAmount is null ? null : $"{_loanAmount:N0} đ")
+                            @Field("Thời hạn", _loanTermMonths is null ? null : $"{_loanTermMonths} tháng")
+                            @Field("Ngân hàng", _loanBankName)
+                            @Field("Lãi suất", _loanInterestRate is null ? null : $"{_loanInterestRate}%/năm")
+                            @Field("Ngày giải ngân", _loanDisbursedDate?.ToString("dd/MM/yyyy"))
+                        </MudGrid>
+                        @if (!string.IsNullOrWhiteSpace(_loanNote))
+                        {
+                            <MudText Typo="Typo.body2" Class="mt-2"><b>Ghi chú:</b> @_loanNote</MudText>
+                        }
+                    }
+                    else
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true">Ứng viên chưa có khoản vay. Bấm thêm khoản vay khi cần hỗ trợ vay vốn.</MudAlert>
+                    }
+                    @if (_canUpdateLoan)
+                    {
+                        <MudButton Class="mt-3 entity-action-button" Variant="Variant.Outlined" Color="Color.Primary" FullWidth="true"
+                                   StartIcon="@(_hasLoan ? Icons.Material.Filled.Edit : Icons.Material.Filled.Add)" OnClick="OpenLoanEdit">
+                            @(_hasLoan ? "Cập nhật khoản vay" : "Thêm khoản vay")
+                        </MudButton>
+                    }
+                    @if (_hasLoan && _canDeleteLoan)
+                    {
+                        <MudButton Class="mt-2 entity-action-button" Variant="Variant.Outlined" Color="Color.Error" FullWidth="true"
+                                   StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteCandidateLoan" Disabled="_busy">
+                            Xóa khoản vay
+                        </MudButton>
+                    }
+                </MudPaper>
+            }
+        </MudItem>
+
+        <MudItem xs="12" md="7">
+            <MudPaper Class="pa-4" Elevation="1">
+                <MudText Typo="Typo.subtitle1" Class="mb-3"><b>Quy trình 20 bước</b></MudText>
+                @if (_cjo is null)
+                {
+                    <MudAlert Severity="Severity.Info">Ứng viên chưa được gắn vào đơn hàng nào.</MudAlert>
+                }
+                else
+                {
+                    <MudTimeline TimelinePosition="TimelinePosition.Start" Class="workflow-timeline">
+                        @foreach (var step in TimelineSteps)
+                        {
+                            var state = StateOf(step);
+                            <MudTimelineItem Color="@state.Color" Size="Size.Small"
+                                             Icon="@(state.Done ? Icons.Material.Filled.Check : state.Current ? Icons.Material.Filled.RadioButtonChecked : Icons.Material.Filled.RadioButtonUnchecked)">
+                                <MudText Typo="Typo.body2" Style="@(state.Pending ? "color:#94a3b8" : "")">
+                                    <b>@(WorkflowSteps.No(step)).</b> @Labels.Vi(step)
+                                </MudText>
+                                @if (state.Current)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="@(step == WorkflowStep.ReselectJobOrder ? Color.Warning : Color.Primary)" Class="mt-1">Đang xử lý</MudChip>
+                                }
+                            </MudTimelineItem>
+                        }
+                    </MudTimeline>
+                }
+            </MudPaper>
+
+            @if (_cjo is not null && _cjo.CurrentStep >= WorkflowStep.OverseasSupport)
+            {
+                @* B19: nhật ký tương tác giai đoạn xứ người — kéo dài nhiều năm (trả nợ, lấy thuế, tái tuyển khi về nước) *@
+                <MudPaper Class="pa-4 mt-4" Elevation="1">
+                    <div class="d-flex align-center mb-3" style="gap:8px">
+                        <MudIcon Icon="@Icons.Material.Filled.Public" Color="Color.Info" />
+                        <MudText Typo="Typo.subtitle1"><b>Nhật ký tương tác giai đoạn xứ người (@_overseasLogs.Count)</b></MudText>
+                    </div>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-3">
+                        Ghi lại các lần liên hệ/hỗ trợ lao động: trả nợ vay, hỗ trợ lấy lại thuế, tái tuyển việc làm trong nước khi về... Nhật ký tiếp tục ghi được cả sau khi hoàn thành quy trình.
+                    </MudText>
+                    @if (_canLogOverseas)
+                    {
+                        <MudTextField @bind-Value="_overseasLogText" Label="Nội dung tương tác/hỗ trợ" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" Class="mb-2" />
+                        <MudButton Variant="Variant.Filled" Color="Color.Info" StartIcon="@Icons.Material.Filled.NoteAdd"
+                                   OnClick="AddOverseasLog" Disabled="@(_busy || string.IsNullOrWhiteSpace(_overseasLogText))" Class="mb-3">
+                            Thêm ghi chú
+                        </MudButton>
+                    }
+                    @if (_overseasLogs.Count == 0)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true">Chưa có ghi chú tương tác nào.</MudAlert>
+                    }
+                    else
+                    {
+                        @foreach (var log in _overseasLogs)
+                        {
+                            <div class="d-flex py-2" style="gap:10px; border-bottom:1px solid var(--mud-palette-lines-default)">
+                                <MudIcon Icon="@Icons.Material.Filled.ChatBubbleOutline" Size="Size.Small" Class="mt-1 mud-text-secondary" />
+                                <div style="min-width:0">
+                                    <MudText Typo="Typo.body2">@log.Notes</MudText>
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@log.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudText>
+                                </div>
+                            </div>
+                        }
+                    }
+                </MudPaper>
+            }
+
+            <MudPaper Class="pa-4 mt-4" Elevation="1">
+                <div class="d-flex justify-space-between align-center mb-3">
+                    <MudText Typo="Typo.subtitle1"><b>Hồ sơ ứng viên (@_documents.Count)</b></MudText>
+                    <MudChip T="string" Size="Size.Small" Color="Color.Info">MinIO</MudChip>
+                </div>
+
+                @if (_canUpdateCandidate)
+                {
+                    <MudGrid Class="mb-3">
+                        <MudItem xs="12" sm="4">
+                            <MudSelect T="DocumentType" @bind-Value="_uploadDocType" Label="Loại hồ sơ" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                @foreach (var type in Enum.GetValues<DocumentType>())
+                                {
+                                    <MudSelectItem Value="@type">@Labels.Vi(type)</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" sm="5">
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">File hồ sơ</MudText>
+                            <InputFile OnChange="OnDocumentSelected" />
+                            @if (_selectedDocumentFile is not null)
+                            {
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                    @_selectedDocumentFile.Name (@FormatFileSize(_selectedDocumentFile.Size))
+                                </MudText>
+                            }
+                        </MudItem>
+                        <MudItem xs="12" sm="3">
+                            <MudTextField @bind-Value="_documentNotes" Label="Ghi chú" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12">
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.UploadFile"
+                                       Disabled="_uploading || _selectedDocumentFile is null" OnClick="UploadDocument">
+                                Upload hồ sơ
+                            </MudButton>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary ml-2">
+                                Hỗ trợ PDF, ảnh, Word, Excel. Tối đa @FormatFileSize(DocumentStorage.MaxUploadBytes).
+                            </MudText>
+                        </MudItem>
+                    </MudGrid>
+                }
+
+                @if (_documents.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true">Chưa có hồ sơ nào được upload.</MudAlert>
+                }
+                else
+                {
+                    <MudHidden Breakpoint="Breakpoint.SmAndDown">
+                    <div class="table-scroll-x">
+                    <MudSimpleTable Dense="true" Hover="true" Striped="true">
+                        <thead>
+                            <tr>
+                                <th>Loại</th>
+                                <th>File hiện hành</th>
+                                <th>Phiên bản</th>
+                                <th>Dung lượng</th>
+                                <th>Upload lúc</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var document in _documents)
+                            {
+                                <tr>
+                                    <td>@Labels.Vi(document.DocType)</td>
+                                    <td>
+                                        <div>@document.FileName</div>
+                                        @if (!string.IsNullOrWhiteSpace(document.Notes))
+                                        {
+                                            <MudText Typo="Typo.caption" Class="mud-text-secondary">@document.Notes</MudText>
+                                        }
+                                    </td>
+                                    <td>v@document.VersionNumber</td>
+                                    <td>@FormatFileSize(document.FileSize)</td>
+                                    <td>@document.UploadedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
+                                    <td style="text-align:right; white-space:nowrap">
+                                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                                                   StartIcon="@Icons.Material.Filled.Download"
+                                                   OnClick="@(() => DownloadDocument(document.VersionId))">
+                                            Tải
+                                        </MudButton>
+                                        @if (_versionsByDoc.TryGetValue(document.DocumentId, out var vers) && vers.Count > 1)
+                                        {
+                                            <MudButton Size="Size.Small" Variant="Variant.Text"
+                                                       StartIcon="@Icons.Material.Filled.History"
+                                                       OnClick="@(() => ToggleHistory(document.DocumentId))">
+                                                Lịch sử (@vers.Count)
+                                            </MudButton>
+                                        }
+                                    </td>
+                                </tr>
+                                @if (_expandedDocId == document.DocumentId && _versionsByDoc.TryGetValue(document.DocumentId, out var history))
+                                {
+                                    <tr>
+                                        <td colspan="6" style="background-color: var(--mud-palette-background-grey)">
+                                            <MudText Typo="Typo.caption" Class="mud-text-secondary mb-1"><b>Các phiên bản</b></MudText>
+                                            @foreach (var v in history)
+                                            {
+                                                <div class="d-flex align-center py-1" style="gap:8px">
+                                                    <MudChip T="string" Size="Size.Small" Color="@(v.IsCurrent ? Color.Success : Color.Default)">v@v.VersionNumber</MudChip>
+                                                    <span class="flex-grow-1">@v.FileName <span class="mud-text-secondary">(@FormatFileSize(v.FileSize) — @v.UploadedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm"))</span></span>
+                                                    <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small" OnClick="@(() => DownloadDocument(v.VersionId))" />
+                                                    @if (_canUpdateCandidate && !v.IsCurrent)
+                                                    {
+                                                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                                                                   StartIcon="@Icons.Material.Filled.RestartAlt"
+                                                                   OnClick="@(() => RestoreVersion(document.DocumentId, v.VersionId))">
+                                                            Đặt hiện hành
+                                                        </MudButton>
+                                                    }
+                                                    else if (v.IsCurrent)
+                                                    {
+                                                        <MudText Typo="Typo.caption" Color="Color.Success">Hiện hành</MudText>
+                                                    }
+                                                </div>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                    </div>
+                    </MudHidden>
+
+                    <MudHidden Breakpoint="Breakpoint.SmAndDown" Invert="true">
+                        @foreach (var document in _documents)
+                        {
+                            <MudPaper Class="mobile-card pa-3" Elevation="0">
+                                <div class="d-flex justify-space-between align-center" style="gap:8px">
+                                    <div style="min-width:0">
+                                        <MudText Typo="Typo.subtitle2" Style="font-weight:600">@Labels.Vi(document.DocType)</MudText>
+                                        <MudText Typo="Typo.caption" Class="mud-text-secondary" Style="word-break:break-all">@document.FileName</MudText>
+                                    </div>
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Default">v@document.VersionNumber</MudChip>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(document.Notes))
+                                {
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@document.Notes</MudText>
+                                }
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1">
+                                    @FormatFileSize(document.FileSize) • @document.UploadedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")
+                                </MudText>
+                                <div class="d-flex flex-wrap mt-1" style="gap:4px">
+                                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                                               StartIcon="@Icons.Material.Filled.Download"
+                                               OnClick="@(() => DownloadDocument(document.VersionId))">
+                                        Tải
+                                    </MudButton>
+                                    @if (_versionsByDoc.TryGetValue(document.DocumentId, out var mvers) && mvers.Count > 1)
+                                    {
+                                        <MudButton Size="Size.Small" Variant="Variant.Text"
+                                                   StartIcon="@Icons.Material.Filled.History"
+                                                   OnClick="@(() => ToggleHistory(document.DocumentId))">
+                                            Lịch sử (@mvers.Count)
+                                        </MudButton>
+                                    }
+                                </div>
+                                @if (_expandedDocId == document.DocumentId && _versionsByDoc.TryGetValue(document.DocumentId, out var mhistory))
+                                {
+                                    <MudDivider Class="my-2" />
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary mb-1"><b>Các phiên bản</b></MudText>
+                                    @foreach (var v in mhistory)
+                                    {
+                                        <div class="d-flex align-center py-1" style="gap:8px">
+                                            <MudChip T="string" Size="Size.Small" Color="@(v.IsCurrent ? Color.Success : Color.Default)">v@v.VersionNumber</MudChip>
+                                            <span class="flex-grow-1" style="min-width:0;word-break:break-all">@v.FileName <span class="mud-text-secondary">(@FormatFileSize(v.FileSize))</span></span>
+                                            <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small" OnClick="@(() => DownloadDocument(v.VersionId))" />
+                                            @if (_canUpdateCandidate && !v.IsCurrent)
+                                            {
+                                                <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small" Color="Color.Primary"
+                                                               OnClick="@(() => RestoreVersion(document.DocumentId, v.VersionId))" />
+                                            }
+                                        </div>
+                                    }
+                                }
+                            </MudPaper>
+                        }
+                    </MudHidden>
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private Candidate? _candidate;
+    private CandidateJobOrder? _cjo;
+    private string? _country;
+    private Guid? _consultantId;
+    private string _consultantName = "—";
+    private Guid? _collaboratorId;
+    private string _collaboratorName = "—";
+    private bool _busy;
+    private bool _accessDenied;
+    private bool _canUpdateCandidate;
+    private bool _canEditCandidateProfile;
+    private bool _canDeleteCandidate;
+    private bool _canReadPayments;
+    private bool _canReadLoan;
+    private bool _canUpdateLoan;
+    private bool _canDeleteLoan;
+    private bool _canAssignJobOrder;
+    private bool _canAdvanceWorkflow;
+    private string _workflowOwnerLabel = "";
+
+    // Tình huống theo bước (dấu "/" trong tên bước = lựa chọn theo hồ sơ)
+    private string? _examMode;            // B8: Thi tuyển | Phỏng vấn | Xét duyệt hồ sơ
+    private string _failNotes = "";       // B8: lý do rớt/từ chối
+    private bool _learnLanguage;          // B10: học tiếng
+    private bool _learnOrientation;       // B10: học định hướng
+    private bool _learnVocational;        // B10: học nghề
+    private bool _skipTraining;           // B10: bỏ qua ("nếu cần")
+    private string? _paymentMode;         // B15: Thanh toán hoàn tất | Cam kết trả nợ
+    private string? _lastFailNote;        // B7.5: lý do rớt gần nhất để hiển thị
+    private List<JobOrder> _reassignJobOrders = new(); // B7.5: đơn hàng mới (khác đơn cũ)
+    private Guid? _reassignJobOrderId;
+    private string _reassignNotes = "";
+    private List<WorkflowStepRecord> _overseasLogs = new(); // B19: nhật ký tương tác
+    private string _overseasLogText = "";
+    private bool _canLogOverseas;
+
+    private bool _hasLoan;
+    private LoanStatus _loanStatus = LoanStatus.Borrowing;
+    private decimal? _loanAmount;
+    private int? _loanTermMonths;
+    private string? _loanBankName;
+    private decimal? _loanInterestRate;
+    private DateOnly? _loanDisbursedDate;
+    private string? _loanNote;
+
+    private List<JobOrder> _jobOrders = new();
+    private List<CandidatePaymentRow> _payments = new();
+    private List<CandidateDocumentRow> _documents = new();
+    private Guid? _selectedJobOrderId;
+    private string _assignNotes = "";
+    private decimal _paymentTotal;
+    private decimal _paymentPaid;
+    private decimal _paymentOutstanding;
+    private int _overduePaymentCount;
+    private DocumentType _uploadDocType = DocumentType.Cccd;
+    private IBrowserFile? _selectedDocumentFile;
+    private string _documentNotes = "";
+    private bool _uploading;
+
+    private record CandidatePaymentRow(Guid Id, string Code, PaymentType Type, decimal Amount, PaymentStatus Status, DateOnly? DueDate, DateOnly? PaidDate);
+    private record CandidateDocumentRow(
+        Guid DocumentId,
+        Guid VersionId,
+        DocumentType DocType,
+        string FileName,
+        long FileSize,
+        string? MimeType,
+        int VersionNumber,
+        DateTimeOffset UploadedAt,
+        string? Notes);
+    private record DocumentVersionRow(Guid VersionId, int VersionNumber, string FileName, long FileSize, DateTimeOffset UploadedAt, bool IsCurrent);
+
+    private Dictionary<Guid, List<DocumentVersionRow>> _versionsByDoc = new();
+    private Guid? _expandedDocId;
+
+    private bool HasEmergencyInfo => !string.IsNullOrWhiteSpace(_candidate?.EmergencyContactName)
+        || !string.IsNullOrWhiteSpace(_candidate?.EmergencyContactPhone);
+    private bool HasBankInfo => !string.IsNullOrWhiteSpace(_candidate?.BankAccountNumber)
+        || !string.IsNullOrWhiteSpace(_candidate?.BankName);
+    private bool HasGuardianInfo => !string.IsNullOrWhiteSpace(_candidate?.GuardianName)
+        || !string.IsNullOrWhiteSpace(_candidate?.GuardianPhone);
+    private bool CanShowCandidateDebt => _canReadPayments && _cjo?.CurrentStep >= WorkflowStep.Deposit;
+    private bool _hasOpenLoan; // còn khoản vay chưa tất toán → chặn B20
+
+    /// <summary>20 bước chính; chèn bước phụ 7.5 ngay trước B8 khi hồ sơ đang ở đó.</summary>
+    private IEnumerable<WorkflowStep> TimelineSteps
+    {
+        get
+        {
+            foreach (var s in WorkflowSteps.Main)
+            {
+                if (s == WorkflowStep.EntranceExam && _cjo?.CurrentStep == WorkflowStep.ReselectJobOrder)
+                    yield return WorkflowStep.ReselectJobOrder;
+                yield return s;
+            }
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        _canUpdateCandidate = await HasPermission("candidates:update");
+        _canEditCandidateProfile = _canUpdateCandidate && BusinessRoleAccess.CanEditCandidateProfile(authState.User);
+        _canDeleteCandidate = await HasPermission("candidates:delete") && BusinessRoleAccess.CanDeleteCandidate(authState.User);
+        _canReadPayments = await HasPermission("payments:read");
+        _canReadLoan = await HasPermission("loans:read");
+        _canUpdateLoan = await HasPermission("loans:update") && BusinessRoleAccess.CanEditLoan(authState.User);
+        _canDeleteLoan = await HasPermission("loans:delete") && BusinessRoleAccess.CanDeleteLoan(authState.User);
+        _canAssignJobOrder = WorkflowStepAccess.CanAssignJobOrder(authState.User);
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _candidate = await db.Candidates.FirstOrDefaultAsync(c => c.Id == Id);
+        if (_candidate is null) return;
+
+        // Đại lý chỉ được xem ứng viên do mình giới thiệu (spec §2.8).
+        var scope = await AgentScope.GetAsync();
+        if ((scope.IsAgentOnly && _candidate.AgentId != scope.AgentId)
+            || (scope.IsCollaboratorOnly && _candidate.CollaboratorId != scope.CollaboratorId))
+        {
+            _accessDenied = true;
+            _candidate = null;
+            return;
+        }
+        // Người phụ trách: Tư vấn viên (tài khoản role consultant) + Cộng tác viên (nguồn giới thiệu).
+        _consultantId = _candidate.ConsultantId;
+        if (_consultantId is not null)
+        {
+            var c = await db.Users.Where(u => u.Id == _consultantId.Value)
+                .Select(u => new { u.FullName, u.Email }).FirstOrDefaultAsync();
+            _consultantName = string.IsNullOrWhiteSpace(c?.FullName) ? (c?.Email ?? "—") : c.FullName;
+        }
+        _collaboratorId = _candidate.CollaboratorId;
+        if (_collaboratorId is not null)
+        {
+            _collaboratorName = await db.Collaborators.Where(x => x.Id == _collaboratorId.Value)
+                .Select(x => x.FullName).FirstOrDefaultAsync() ?? "—";
+        }
+
+        if (_canReadLoan)
+        {
+            var loan = await db.Loans.Where(l => l.CandidateId == Id)
+                .OrderByDescending(l => l.CreatedAt).FirstOrDefaultAsync();
+            _hasLoan = loan is not null;
+            _loanStatus = loan?.Status == LoanStatus.NotBorrowed ? LoanStatus.Borrowing : loan?.Status ?? LoanStatus.Borrowing;
+            _loanAmount = loan?.Amount;
+            _loanTermMonths = loan?.TermMonths;
+            _loanBankName = loan?.BankName;
+            _loanInterestRate = loan?.InterestRate;
+            _loanDisbursedDate = loan?.DisbursedDate;
+            _loanNote = loan?.Note;
+            _hasOpenLoan = loan is not null && loan.Status != LoanStatus.Settled;
+        }
+
+        _cjo = await db.CandidateJobOrders.Where(j => j.CandidateId == Id)
+            .OrderByDescending(j => j.CreatedAt).FirstOrDefaultAsync();
+        if (_cjo is not null)
+        {
+            _country = await db.JobOrders.Where(j => j.Id == _cjo.JobOrderId).Select(j => j.Country).FirstOrDefaultAsync();
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            _canAdvanceWorkflow = WorkflowStepAccess.CanAdvance(authState.User, _cjo.CurrentStep);
+            _workflowOwnerLabel = WorkflowStepAccess.OwnerLabel(_cjo.CurrentStep);
+            _canLogOverseas = _canUpdateCandidate
+                || WorkflowStepAccess.CanAdvance(authState.User, WorkflowStep.OverseasSupport);
+
+            if (_cjo.CurrentStep == WorkflowStep.ReselectJobOrder)
+            {
+                // Bước 7.5: chỉ được chọn đơn hàng MỚI (khác đơn rớt), còn hạn ứng tuyển.
+                var todayDeadline = DateOnly.FromDateTime(DateTime.Today);
+                _reassignJobOrders = await db.JobOrders
+                    .Where(j => j.Id != _cjo.JobOrderId
+                                && j.Status != JobOrderStatus.Cancelled
+                                && (j.ApplicationDeadline == null || j.ApplicationDeadline >= todayDeadline))
+                    .OrderByDescending(j => j.CreatedAt).ToListAsync();
+                _lastFailNote = await db.WorkflowStepRecords
+                    .Where(r => r.CandidateJobOrderId == _cjo.Id && r.Step == WorkflowStep.EntranceExam && r.Status == WorkflowStepStatus.Failed)
+                    .OrderByDescending(r => r.CreatedAt)
+                    .Select(r => r.Notes)
+                    .FirstOrDefaultAsync();
+            }
+
+            if (_cjo.CurrentStep >= WorkflowStep.OverseasSupport)
+            {
+                // Nhật ký B19 = các record InProgress của bước OverseasSupport (mỗi ghi chú 1 record).
+                _overseasLogs = await db.WorkflowStepRecords
+                    .Where(r => r.CandidateJobOrderId == _cjo.Id && r.Step == WorkflowStep.OverseasSupport && r.Status == WorkflowStepStatus.InProgress)
+                    .OrderByDescending(r => r.CreatedAt)
+                    .ToListAsync();
+            }
+        }
+        else
+        {
+            _canAdvanceWorkflow = false;
+            _workflowOwnerLabel = "";
+            // Job hết hạn ứng tuyển không nhận thêm ứng viên (góp ý Vietgroup).
+            var todayForDeadline = DateOnly.FromDateTime(DateTime.Today);
+            _jobOrders = await db.JobOrders
+                .Where(j => j.Status != JobOrderStatus.Cancelled
+                            && (j.ApplicationDeadline == null || j.ApplicationDeadline >= todayForDeadline))
+                .OrderByDescending(j => j.CreatedAt).ToListAsync();
+        }
+
+        if (CanShowCandidateDebt)
+        {
+            var payments = await db.Payments
+                .Where(p => p.CandidateId == Id)
+                .OrderByDescending(p => p.CreatedAt)
+                .ToListAsync();
+
+            _payments = payments.Select(p => new CandidatePaymentRow(
+                p.Id,
+                p.Code,
+                p.PaymentType,
+                p.Amount,
+                p.Status,
+                p.DueDate,
+                p.PaidDate)).ToList();
+
+            _paymentTotal = payments.Where(p => p.Status != PaymentStatus.Refunded).Sum(p => p.Amount);
+            _paymentPaid = payments.Where(p => p.Status == PaymentStatus.Paid).Sum(p => p.Amount);
+            _paymentOutstanding = Math.Max(0, _paymentTotal - _paymentPaid);
+            var today = DateOnly.FromDateTime(DateTime.UtcNow);
+            _overduePaymentCount = payments.Count(p =>
+                p.Status is PaymentStatus.Pending or PaymentStatus.Partial or PaymentStatus.Overdue
+                && p.DueDate is not null
+                && p.DueDate.Value < today);
+        }
+
+        var documents = await db.CandidateDocuments
+            .Where(d => d.CandidateId == Id)
+            .OrderBy(d => d.DocType)
+            .ToListAsync();
+
+        if (documents.Count == 0)
+        {
+            _documents = new();
+            return;
+        }
+
+        var documentIds = documents.Select(d => d.Id).ToList();
+        var versions = await db.DocumentVersions
+            .Where(v => documentIds.Contains(v.DocumentId))
+            .OrderByDescending(v => v.VersionNumber)
+            .ToListAsync();
+
+        _documents = documents
+            .Select(d =>
+            {
+                var current = d.CurrentVersionId is null
+                    ? versions.FirstOrDefault(v => v.DocumentId == d.Id)
+                    : versions.FirstOrDefault(v => v.Id == d.CurrentVersionId.Value)
+                        ?? versions.FirstOrDefault(v => v.DocumentId == d.Id);
+
+                return current is null
+                    ? null
+                    : new CandidateDocumentRow(
+                        d.Id,
+                        current.Id,
+                        d.DocType,
+                        current.FileName,
+                        current.FileSize,
+                        current.MimeType,
+                        current.VersionNumber,
+                        current.CreatedAt,
+                        current.Notes);
+            })
+            .Where(row => row is not null)
+            .Cast<CandidateDocumentRow>()
+            .ToList();
+
+        _versionsByDoc = documents.ToDictionary(
+            d => d.Id,
+            d => versions.Where(v => v.DocumentId == d.Id)
+                .OrderByDescending(v => v.VersionNumber)
+                .Select(v => new DocumentVersionRow(v.Id, v.VersionNumber, v.FileName, v.FileSize, v.CreatedAt,
+                    d.CurrentVersionId == v.Id))
+                .ToList());
+    }
+
+    private async Task OpenAiAnalysis()
+    {
+        var parameters = new DialogParameters<CandidateAnalysisDialog> { { x => x.CandidateId, Id } };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+        await DialogService.ShowAsync<CandidateAnalysisDialog>("Phân tích hồ sơ AI", parameters, options);
+    }
+
+    private async Task OpenLoanEdit()
+    {
+        if (!_canUpdateLoan) return;
+        var parameters = new DialogParameters<LoanDialog> { { x => x.CandidateId, Id } };
+        var dialog = await DialogService.ShowAsync<LoanDialog>("Hồ sơ hỗ trợ vay", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+        {
+            Snackbar.Add("Đã cập nhật hồ sơ vay", Severity.Success);
+            await Load();
+        }
+    }
+
+    private async Task ShowConsultant(Guid id)
+    {
+        var parameters = new DialogParameters<ConsultantInfoDialog> { { x => x.ConsultantId, id } };
+        await DialogService.ShowAsync<ConsultantInfoDialog>("Thông tin tư vấn viên", parameters);
+    }
+
+    private async Task ShowCollaborator(Guid id)
+    {
+        var parameters = new DialogParameters<CollaboratorInfoDialog> { { x => x.CollaboratorId, id } };
+        await DialogService.ShowAsync<CollaboratorInfoDialog>("Thông tin cộng tác viên", parameters);
+    }
+
+    private static string Initials(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "?";
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return "?";
+        return parts.Length == 1 ? parts[0][..1].ToUpper() : $"{parts[^2][0]}{parts[^1][0]}".ToUpper();
+    }
+
+    private async Task OpenEdit()
+    {
+        if (!_canEditCandidateProfile) return;
+        var parameters = new DialogParameters<CandidateDialog> { { x => x.CandidateId, Id } };
+        var dialog = await DialogService.ShowAsync<CandidateDialog>("Sửa thông tin ứng viên", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+        {
+            Snackbar.Add("Đã cập nhật ứng viên", Severity.Success);
+            await Load();
+        }
+    }
+
+    private async Task DeleteCandidate()
+    {
+        if (_candidate is null) return;
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (!await HasPermission("candidates:delete") || !BusinessRoleAccess.CanDeleteCandidate(authState.User))
+        {
+            Snackbar.Add("Bạn không có quyền xóa ứng viên.", Severity.Warning);
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "Xóa ứng viên?",
+            $"Xóa hồ sơ ứng viên \"{_candidate.FullName}\" và toàn bộ dữ liệu nghiệp vụ đi kèm như hồ sơ, tiến trình, công nợ, vay vốn, visa/vé và hoa hồng. Bạn có chắc chắn?",
+            yesText: "Xóa",
+            cancelText: "Hủy");
+        if (confirm != true) return;
+
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var candidate = await db.Candidates.FirstOrDefaultAsync(c => c.Id == Id);
+            if (candidate is null)
+            {
+                Snackbar.Add("Ứng viên này không còn tồn tại.", Severity.Info);
+                Nav.NavigateTo("/candidates");
+                return;
+            }
+
+            var actorId = await AuthStateProvider.GetRequiredUserIdAsync(db);
+            var cjoIds = await db.CandidateJobOrders.Where(c => c.CandidateId == Id).Select(c => c.Id).ToListAsync();
+            var documentIds = await db.CandidateDocuments.Where(d => d.CandidateId == Id).Select(d => d.Id).ToListAsync();
+            var payments = await db.Payments.Where(p => p.CandidateId == Id)
+                .Select(p => new { p.Id, p.ReceiptId })
+                .ToListAsync();
+            var paymentIds = payments.Select(p => p.Id).ToList();
+            var paymentReceiptIds = payments.Where(p => p.ReceiptId is not null).Select(p => p.ReceiptId!.Value).ToList();
+            var commissionReceiptIds = await db.AgentCommissions
+                .Where(c => c.CandidateId == Id && c.ReceiptId != null)
+                .Select(c => c.ReceiptId!.Value)
+                .ToListAsync();
+
+            var versions = await db.DocumentVersions.Where(v => documentIds.Contains(v.DocumentId)).ToListAsync();
+            var documents = await db.CandidateDocuments.Where(d => d.CandidateId == Id).ToListAsync();
+            var workflowRecords = await db.WorkflowStepRecords.Where(r => cjoIds.Contains(r.CandidateJobOrderId)).ToListAsync();
+            var assignments = await db.CandidateJobOrders.Where(c => c.CandidateId == Id).ToListAsync();
+            var loans = await db.Loans.Where(l => l.CandidateId == Id).ToListAsync();
+            var paymentRows = await db.Payments.Where(p => p.CandidateId == Id).ToListAsync();
+            var receipts = await db.Receipts
+                .Where(r => r.CandidateId == Id
+                    || (r.PaymentId != null && paymentIds.Contains(r.PaymentId.Value))
+                    || paymentReceiptIds.Contains(r.Id)
+                    || commissionReceiptIds.Contains(r.Id))
+                .ToListAsync();
+            var visas = await db.Visas.Where(v => v.CandidateId == Id).ToListAsync();
+            var flights = await db.Flights.Where(f => f.CandidateId == Id).ToListAsync();
+            var commissions = await db.AgentCommissions.Where(c => c.CandidateId == Id).ToListAsync();
+            var notifications = await db.Notifications
+                .Where(n => n.ReferenceType == "candidate" && n.ReferenceId == Id)
+                .ToListAsync();
+
+            db.DocumentVersions.RemoveRange(versions);
+            db.CandidateDocuments.RemoveRange(documents);
+            db.WorkflowStepRecords.RemoveRange(workflowRecords);
+            db.CandidateJobOrders.RemoveRange(assignments);
+            db.Loans.RemoveRange(loans);
+            db.Receipts.RemoveRange(receipts);
+            db.Payments.RemoveRange(paymentRows);
+            db.Visas.RemoveRange(visas);
+            db.Flights.RemoveRange(flights);
+            db.AgentCommissions.RemoveRange(commissions);
+            db.Notifications.RemoveRange(notifications);
+
+            if (candidate.LeadId is Guid leadId)
+            {
+                var lead = await db.Leads.FirstOrDefaultAsync(l => l.Id == leadId);
+                if (lead is not null)
+                {
+                    lead.Status = LeadStatus.New;
+                    lead.UpdatedAt = DateTimeOffset.UtcNow;
+                    db.LeadActivities.Add(new LeadActivity
+                    {
+                        LeadId = lead.Id,
+                        ActivityType = LeadActivityType.StatusChange,
+                        Content = "Xóa hồ sơ ứng viên liên kết; đưa lead về trạng thái Lead mới",
+                        NewStatus = LeadStatus.New,
+                    });
+                }
+            }
+
+            db.AddAudit(actorId, "delete", "candidates", candidate.Id, new
+            {
+                candidate.Code,
+                candidate.FullName,
+                candidate.Phone,
+                Documents = documents.Count,
+                Payments = paymentRows.Count,
+                Loans = loans.Count,
+                JobOrders = assignments.Count,
+            }, null);
+            db.Candidates.Remove(candidate);
+            await db.SaveChangesAsync();
+
+            Snackbar.Add("Đã xóa hồ sơ ứng viên.", Severity.Success);
+            Nav.NavigateTo("/candidates");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DeleteCandidateLoan()
+    {
+        if (!_hasLoan) return;
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (!await HasPermission("loans:delete") || !BusinessRoleAccess.CanDeleteLoan(authState.User))
+        {
+            Snackbar.Add("Bạn không có quyền xóa khoản vay.", Severity.Warning);
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "Xóa khoản vay?",
+            $"Xóa hồ sơ vay vốn của ứng viên \"{_candidate?.FullName}\". Bạn có chắc chắn?",
+            yesText: "Xóa",
+            cancelText: "Hủy");
+        if (confirm != true) return;
+
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var loans = await db.Loans.Where(l => l.CandidateId == Id).ToListAsync();
+            if (loans.Count == 0)
+            {
+                Snackbar.Add("Ứng viên này chưa có khoản vay.", Severity.Info);
+                await Load();
+                return;
+            }
+
+            var actorId = await AuthStateProvider.GetRequiredUserIdAsync(db);
+            db.AddAudit(actorId, "delete", "loans", loans.OrderByDescending(l => l.CreatedAt).First().Id,
+                loans.Select(l => new { l.Code, l.CandidateId, l.Status, l.Amount, l.BankName }).ToList(), null);
+            db.Loans.RemoveRange(loans);
+            await db.SaveChangesAsync();
+            Snackbar.Add("Đã xóa khoản vay.", Severity.Success);
+            await Load();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task AssignJobOrder()
+    {
+        if (_selectedJobOrderId is null) return;
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (!WorkflowStepAccess.CanAssignJobOrder(authState.User))
+        {
+            Snackbar.Add("Bạn không có quyền gắn ứng viên vào đơn hàng.", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            // Chặn cứng job hết hạn ứng tuyển (kể cả khi dropdown còn cache job cũ).
+            var jobInfo = await db.JobOrders.Where(j => j.Id == _selectedJobOrderId.Value)
+                .Select(j => new { j.Code, j.ApplicationDeadline }).FirstOrDefaultAsync();
+            if (jobInfo?.ApplicationDeadline is DateOnly deadline && deadline < DateOnly.FromDateTime(DateTime.Today))
+            {
+                Snackbar.Add($"Job {jobInfo.Code} đã hết hạn ứng tuyển ({deadline:dd/MM/yyyy}) — không thể gắn thêm ứng viên.", Severity.Warning);
+                return;
+            }
+
+            var actorId = await AuthStateProvider.GetRequiredUserIdAsync(db);
+            var assignment = new CandidateJobOrder
+            {
+                CandidateId = Id,
+                JobOrderId = _selectedJobOrderId.Value,
+                CurrentStep = WorkflowStep.Lead,
+                Status = CandidateJobOrderStatus.Active,
+                AssignedTo = actorId,
+                Notes = string.IsNullOrWhiteSpace(_assignNotes) ? null : _assignNotes,
+            };
+            db.CandidateJobOrders.Add(assignment);
+            db.AddAudit(actorId, "assign", "candidate_job_orders", assignment.Id, null, new
+            {
+                assignment.CandidateId,
+                assignment.JobOrderId,
+                assignment.CurrentStep,
+                assignment.Status,
+                assignment.AssignedTo,
+            });
+            await db.SaveChangesAsync();
+
+            Snackbar.Add("Đã gắn ứng viên vào đơn hàng", Severity.Success);
+            _selectedJobOrderId = null;
+            _assignNotes = "";
+            await Load();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private (Color Color, bool Done, bool Current, bool Pending) StateOf(WorkflowStep step)
+    {
+        if (_cjo is null) return (Color.Default, false, false, true);
+        if (step < _cjo.CurrentStep) return (Color.Success, true, false, false);
+        if (step == _cjo.CurrentStep) return (Color.Primary, false, true, false);
+        return (Color.Default, false, false, true);
+    }
+
+    private async Task AdvanceStep()
+    {
+        if (_cjo is null || _cjo.CurrentStep >= WorkflowStep.Completed) return;
+        // Bước 7.5 không đi qua nút này — phải gắn đơn hàng mới (ReassignJobOrder).
+        if (_cjo.CurrentStep == WorkflowStep.ReselectJobOrder) return;
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (!WorkflowStepAccess.CanAdvance(authState.User, _cjo.CurrentStep))
+        {
+            Snackbar.Add("Bạn không có quyền cập nhật quy trình ứng viên.", Severity.Warning);
+            return;
+        }
+
+        // Ràng buộc tình huống theo bước (dấu "/" = lựa chọn theo hồ sơ).
+        string? stepNotes = null;
+        var stepStatus = WorkflowStepStatus.Completed;
+        switch (_cjo.CurrentStep)
+        {
+            case WorkflowStep.EntranceExam:
+                if (string.IsNullOrEmpty(_examMode))
+                {
+                    Snackbar.Add("Chọn tình huống xét tuyển (Thi tuyển / Phỏng vấn / Xét duyệt hồ sơ) trước.", Severity.Warning);
+                    return;
+                }
+                stepNotes = $"Tình huống: {_examMode} — Đậu";
+                break;
+            case WorkflowStep.Orientation:
+                if (_skipTraining)
+                {
+                    stepNotes = "Bỏ qua — đơn hàng không yêu cầu học";
+                    stepStatus = WorkflowStepStatus.Skipped;
+                }
+                else
+                {
+                    var subjects = new List<string>();
+                    if (_learnLanguage) subjects.Add("Học tiếng");
+                    if (_learnOrientation) subjects.Add("Học định hướng");
+                    if (_learnVocational) subjects.Add("Học nghề");
+                    if (subjects.Count == 0)
+                    {
+                        Snackbar.Add("Chọn ít nhất một nội dung học, hoặc bật Bỏ qua nếu đơn hàng không yêu cầu.", Severity.Warning);
+                        return;
+                    }
+                    stepNotes = string.Join(" + ", subjects);
+                }
+                break;
+            case WorkflowStep.FullPayment:
+                if (string.IsNullOrEmpty(_paymentMode))
+                {
+                    Snackbar.Add("Chọn hình thức: Thanh toán hoàn tất hoặc Cam kết trả nợ.", Severity.Warning);
+                    return;
+                }
+                if (_paymentMode == "Cam kết trả nợ" && !_hasLoan)
+                {
+                    Snackbar.Add("Ứng viên chưa có hồ sơ vay — tạo khoản vay ở thẻ Hỗ trợ vay vốn trước.", Severity.Warning);
+                    return;
+                }
+                stepNotes = _paymentMode;
+                break;
+            case WorkflowStep.OverseasSupport:
+                // Gate B20: hết nghĩa vụ (vay tất toán / không vay) + xác nhận thủ công.
+                if (_hasOpenLoan)
+                {
+                    Snackbar.Add("Khoản vay chưa tất toán — chưa thể hoàn thành quy trình.", Severity.Warning);
+                    return;
+                }
+                var confirm = await DialogService.ShowMessageBoxAsync(
+                    "Hoàn thành quy trình?",
+                    $"Xác nhận ứng viên \"{_candidate?.FullName}\" đã hết nghĩa vụ (nợ vay tất toán/không vay, không còn hỗ trợ thuế/tái tuyển đang xử lý) và hoàn thành quy trình 20 bước?",
+                    yesText: "Xác nhận hoàn thành",
+                    cancelText: "Hủy");
+                if (confirm != true) return;
+                stepNotes = "Xác nhận hết nghĩa vụ — hoàn thành quy trình";
+                break;
+        }
+
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var cjo = await db.CandidateJobOrders.FirstAsync(j => j.Id == _cjo.Id);
+            var actorId = await AuthStateProvider.GetRequiredUserIdAsync(db);
+            var completed = cjo.CurrentStep;
+            var next = WorkflowSteps.Next(cjo.CurrentStep);
+            var oldStatus = cjo.Status;
+
+            db.WorkflowStepRecords.Add(new WorkflowStepRecord
+            {
+                CandidateJobOrderId = cjo.Id,
+                Step = completed,
+                Status = stepStatus,
+                AssignedTo = actorId,
+                CompletedAt = DateTimeOffset.UtcNow,
+                Notes = stepNotes,
+                CreatedBy = actorId,
+            });
+            cjo.CurrentStep = next;
+            cjo.UpdatedAt = DateTimeOffset.UtcNow;
+            if (next == WorkflowStep.Completed) cjo.Status = CandidateJobOrderStatus.Completed;
+
+            var newCommissions = await EnsureCommissionsAsync(db, cjo, _candidate?.AgentId, actorId);
+            db.AddAudit(actorId, "advance_step", "candidate_job_orders", cjo.Id, new
+            {
+                CurrentStep = completed,
+                Status = oldStatus,
+            }, new
+            {
+                CurrentStep = next,
+                cjo.Status,
+                CompletedStep = completed,
+                NewCommissions = newCommissions,
+            });
+            await db.SaveChangesAsync();
+
+            Snackbar.Add($"Đã chuyển sang bước: {Labels.Vi(next)}", Severity.Success);
+            if (newCommissions > 0)
+                Snackbar.Add($"Đã phát sinh {newCommissions} mốc hoa hồng cho đại lý.", Severity.Info);
+            _examMode = null;
+            _failNotes = "";
+            _paymentMode = null;
+            _skipTraining = _learnLanguage = _learnOrientation = _learnVocational = false;
+            await Load();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>B8 rớt (thi trượt / chủ từ chối / hồ sơ bị loại) → lùi về bước phụ 7.5 "Chọn lại đơn hàng khác".</summary>
+    private async Task FailEntranceExam()
+    {
+        if (_cjo is null || _cjo.CurrentStep != WorkflowStep.EntranceExam) return;
+        if (string.IsNullOrEmpty(_examMode))
+        {
+            Snackbar.Add("Chọn tình huống xét tuyển trước khi đánh rớt.", Severity.Warning);
+            return;
+        }
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (!WorkflowStepAccess.CanAdvance(authState.User, WorkflowStep.EntranceExam))
+        {
+            Snackbar.Add("Bạn không có quyền cập nhật quy trình ứng viên.", Severity.Warning);
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "Đánh rớt bước 8?",
+            $"Ứng viên \"{_candidate?.FullName}\" rớt {_examMode} — hồ sơ lùi về bước 7.5 để chọn lại đơn hàng khác (giữ nguyên hồ sơ). Bạn có chắc chắn?",
+            yesText: "Đánh rớt",
+            cancelText: "Hủy");
+        if (confirm != true) return;
+
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var cjo = await db.CandidateJobOrders.FirstAsync(j => j.Id == _cjo.Id);
+            var actorId = await AuthStateProvider.GetRequiredUserIdAsync(db);
+            var note = $"Rớt ({_examMode})" + (string.IsNullOrWhiteSpace(_failNotes) ? "" : $": {_failNotes.Trim()}");
+
+            db.WorkflowStepRecords.Add(new WorkflowStepRecord
+            {
+                CandidateJobOrderId = cjo.Id,
+                Step = WorkflowStep.EntranceExam,
+                Status = WorkflowStepStatus.Failed,
+                AssignedTo = actorId,
+                CompletedAt = DateTimeOffset.UtcNow,
+                Notes = note,
+                CreatedBy = actorId,
+            });
+            cjo.CurrentStep = WorkflowStep.ReselectJobOrder;
+            cjo.UpdatedAt = DateTimeOffset.UtcNow;
+            db.AddAudit(actorId, "fail_step", "candidate_job_orders", cjo.Id,
+                new { CurrentStep = WorkflowStep.EntranceExam },
+                new { cjo.CurrentStep, Note = note });
+            await db.SaveChangesAsync();
+
+            Snackbar.Add("Đã lùi hồ sơ về bước 7.5 — chọn lại đơn hàng khác.", Severity.Warning);
+            _examMode = null;
+            _failNotes = "";
+            await Load();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>B7.5 → B8: bắt buộc gắn đơn hàng MỚI (khác đơn rớt); giữ nguyên hồ sơ và lịch sử bước.</summary>
+    private async Task ReassignJobOrder()
+    {
+        if (_cjo is null || _cjo.CurrentStep != WorkflowStep.ReselectJobOrder || _reassignJobOrderId is null) return;
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (!WorkflowStepAccess.CanAdvance(authState.User, WorkflowStep.ReselectJobOrder))
+        {
+            Snackbar.Add("Bạn không có quyền gắn lại đơn hàng cho ứng viên.", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var cjo = await db.CandidateJobOrders.FirstAsync(j => j.Id == _cjo.Id);
+
+            // Ràng buộc cứng: phải là đơn hàng KHÁC đơn cũ và còn hạn ứng tuyển.
+            if (_reassignJobOrderId.Value == cjo.JobOrderId)
+            {
+                Snackbar.Add("Phải chọn đơn hàng MỚI (khác đơn hàng đã rớt).", Severity.Warning);
+                return;
+            }
+            var newJob = await db.JobOrders.FirstOrDefaultAsync(j => j.Id == _reassignJobOrderId.Value);
+            if (newJob is null) return;
+            if (newJob.ApplicationDeadline is DateOnly deadline && deadline < DateOnly.FromDateTime(DateTime.Today))
+            {
+                Snackbar.Add($"Job {newJob.Code} đã hết hạn ứng tuyển ({deadline:dd/MM/yyyy}).", Severity.Warning);
+                return;
+            }
+
+            var actorId = await AuthStateProvider.GetRequiredUserIdAsync(db);
+            var oldJobCode = await db.JobOrders.Where(j => j.Id == cjo.JobOrderId).Select(j => j.Code).FirstOrDefaultAsync();
+
+            db.WorkflowStepRecords.Add(new WorkflowStepRecord
+            {
+                CandidateJobOrderId = cjo.Id,
+                Step = WorkflowStep.ReselectJobOrder,
+                Status = WorkflowStepStatus.Completed,
+                AssignedTo = actorId,
+                CompletedAt = DateTimeOffset.UtcNow,
+                Notes = $"Đổi từ đơn {oldJobCode} sang {newJob.Code}" + (string.IsNullOrWhiteSpace(_reassignNotes) ? "" : $" — {_reassignNotes.Trim()}"),
+                CreatedBy = actorId,
+            });
+            var oldJobOrderId = cjo.JobOrderId;
+            cjo.JobOrderId = newJob.Id;
+            cjo.CurrentStep = WorkflowStep.EntranceExam;
+            cjo.UpdatedAt = DateTimeOffset.UtcNow;
+            db.AddAudit(actorId, "reselect_job_order", "candidate_job_orders", cjo.Id,
+                new { JobOrderId = oldJobOrderId, CurrentStep = WorkflowStep.ReselectJobOrder },
+                new { cjo.JobOrderId, cjo.CurrentStep });
+            await db.SaveChangesAsync();
+
+            Snackbar.Add($"Đã gắn đơn hàng mới {newJob.Code} — hồ sơ sang bước 8.", Severity.Success);
+            _reassignJobOrderId = null;
+            _reassignNotes = "";
+            await Load();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>B19: thêm 1 ghi chú vào nhật ký tương tác giai đoạn xứ người (record InProgress).</summary>
+    private async Task AddOverseasLog()
+    {
+        if (_cjo is null || string.IsNullOrWhiteSpace(_overseasLogText) || !_canLogOverseas) return;
+
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var actorId = await AuthStateProvider.GetRequiredUserIdAsync(db);
+            var record = new WorkflowStepRecord
+            {
+                CandidateJobOrderId = _cjo.Id,
+                Step = WorkflowStep.OverseasSupport,
+                Status = WorkflowStepStatus.InProgress,
+                AssignedTo = actorId,
+                StartedAt = DateTimeOffset.UtcNow,
+                Notes = _overseasLogText.Trim(),
+                CreatedBy = actorId,
+            };
+            db.WorkflowStepRecords.Add(record);
+            db.AddAudit(actorId, "overseas_log", "workflow_step_records", record.Id, null, new
+            {
+                record.CandidateJobOrderId,
+                record.Step,
+                record.Notes,
+            });
+            await db.SaveChangesAsync();
+
+            Snackbar.Add("Đã thêm ghi chú tương tác.", Severity.Success);
+            _overseasLogText = "";
+            await Load();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void OnDocumentSelected(InputFileChangeEventArgs args)
+    {
+        _selectedDocumentFile = args.File;
+    }
+
+    private async Task UploadDocument()
+    {
+        if (_selectedDocumentFile is null)
+        {
+            Snackbar.Add("Vui lòng chọn file hồ sơ.", Severity.Warning);
+            return;
+        }
+        if (!await HasPermission("candidates:update"))
+        {
+            Snackbar.Add("Bạn không có quyền upload hồ sơ ứng viên.", Severity.Warning);
+            return;
+        }
+
+        _uploading = true;
+        try
+        {
+            var uploaded = await DocumentStorage.UploadAsync(Id, _uploadDocType, _selectedDocumentFile);
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var actorId = await AuthStateProvider.GetRequiredUserIdAsync(db);
+            var document = await db.CandidateDocuments
+                .FirstOrDefaultAsync(d => d.CandidateId == Id && d.DocType == _uploadDocType);
+
+            var createdDocument = false;
+            if (document is null)
+            {
+                document = new CandidateDocument
+                {
+                    CandidateId = Id,
+                    DocType = _uploadDocType,
+                };
+                db.CandidateDocuments.Add(document);
+                createdDocument = true;
+            }
+
+            var nextVersion = await db.DocumentVersions
+                .Where(v => v.DocumentId == document.Id)
+                .MaxAsync(v => (int?)v.VersionNumber) ?? 0;
+
+            var version = new DocumentVersion
+            {
+                DocumentId = document.Id,
+                VersionNumber = nextVersion + 1,
+                FileUrl = uploaded.ObjectKey,
+                FileName = uploaded.FileName,
+                FileSize = uploaded.FileSize,
+                MimeType = uploaded.ContentType,
+                UploadedBy = actorId,
+                Notes = string.IsNullOrWhiteSpace(_documentNotes) ? null : _documentNotes.Trim(),
+            };
+            db.DocumentVersions.Add(version);
+            document.CurrentVersionId = version.Id;
+            document.UpdatedAt = DateTimeOffset.UtcNow;
+            db.AddAudit(actorId, createdDocument ? "create" : "upload_version", "candidate_documents", document.Id, null, new
+            {
+                document.CandidateId,
+                document.DocType,
+                document.CurrentVersionId,
+                VersionId = version.Id,
+                version.VersionNumber,
+                ObjectKey = version.FileUrl,
+                version.FileName,
+                version.FileSize,
+                version.MimeType,
+            });
+
+            await db.SaveChangesAsync();
+            Snackbar.Add("Đã upload hồ sơ lên MinIO.", Severity.Success);
+            _selectedDocumentFile = null;
+            _documentNotes = "";
+            await Load();
+        }
+        catch (InvalidOperationException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Không upload được hồ sơ: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _uploading = false;
+        }
+    }
+
+    private async Task DownloadDocument(Guid versionId)
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var version = await db.DocumentVersions.FirstOrDefaultAsync(v => v.Id == versionId);
+            if (version is null)
+            {
+                Snackbar.Add("Không tìm thấy phiên bản hồ sơ.", Severity.Warning);
+                return;
+            }
+
+            var url = await DocumentStorage.GetDownloadUrlAsync(version.FileUrl);
+            Nav.NavigateTo(url, forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Không tạo được link tải hồ sơ: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void ToggleHistory(Guid documentId)
+        => _expandedDocId = _expandedDocId == documentId ? null : documentId;
+
+    private async Task RestoreVersion(Guid documentId, Guid versionId)
+    {
+        if (!await HasPermission("candidates:update"))
+        {
+            Snackbar.Add("Bạn không có quyền khôi phục hồ sơ.", Severity.Warning);
+            return;
+        }
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var document = await db.CandidateDocuments.FirstOrDefaultAsync(d => d.Id == documentId && d.CandidateId == Id);
+        if (document is null) return;
+        if (document.CurrentVersionId == versionId) return;
+
+        var actorId = await AuthStateProvider.GetRequiredUserIdAsync(db);
+        var oldVersionId = document.CurrentVersionId;
+        document.CurrentVersionId = versionId;
+        document.UpdatedAt = DateTimeOffset.UtcNow;
+        db.AddAudit(actorId, "restore_version", "candidate_documents", document.Id,
+            new { CurrentVersionId = oldVersionId }, new { document.CurrentVersionId });
+        await db.SaveChangesAsync();
+        Snackbar.Add("Đã đặt phiên bản này làm hiện hành.", Severity.Success);
+        await Load();
+    }
+
+    // Mốc hoa hồng ↔ bước workflow tương ứng (mục 8.3).
+    private static readonly (CommissionMilestone Milestone, WorkflowStep Step)[] CommissionMilestones =
+    {
+        (CommissionMilestone.Deposit, WorkflowStep.Deposit),
+        (CommissionMilestone.Selected, WorkflowStep.Selected),
+        (CommissionMilestone.Departure, WorkflowStep.Departure),
+    };
+
+    /// <summary>Tự sinh hoa hồng cho các mốc đã đạt (nếu ứng viên có đại lý và có cấu hình). Idempotent.</summary>
+    private static async Task<int> EnsureCommissionsAsync(ApplicationDbContext db, CandidateJobOrder cjo, Guid? agentId, Guid actorId)
+    {
+        if (agentId is null) return 0;
+        var jo = await db.JobOrders.FirstOrDefaultAsync(j => j.Id == cjo.JobOrderId);
+        if (jo is null) return 0;
+        var baseAmount = jo.CostAmount ?? 0m;
+        var configs = await db.AgentCommissionConfigs.Where(c => c.AgentId == agentId.Value).ToListAsync();
+
+        var created = 0;
+        foreach (var (milestone, step) in CommissionMilestones)
+        {
+            if ((int)cjo.CurrentStep < (int)step) continue;
+
+            // Không lọc theo JobOrderId: ứng viên đổi đơn ở bước 7.5 không được phát sinh lại
+            // mốc hoa hồng đã hưởng (đặt cọc/trúng tuyển chỉ tính 1 lần cho mỗi ứng viên).
+            var exists = await db.AgentCommissions.AnyAsync(c =>
+                c.AgentId == agentId.Value && c.CandidateId == cjo.CandidateId &&
+                c.Milestone == milestone);
+            if (exists) continue;
+
+            // Ưu tiên cấu hình theo đúng đơn hàng / quốc gia, rồi tới cấu hình chung.
+            var cfg = configs.Where(c => c.Milestone == milestone)
+                .OrderByDescending(c => c.JobOrderId == cjo.JobOrderId)
+                .ThenByDescending(c => c.Country == jo.Country)
+                .FirstOrDefault();
+            if (cfg is null) continue;
+
+            var amount = cfg.Percentage.HasValue
+                ? baseAmount * cfg.Percentage.Value / 100m
+                : (cfg.FixedAmount ?? 0m);
+
+            var commission = new AgentCommission
+            {
+                AgentId = agentId.Value,
+                CandidateId = cjo.CandidateId,
+                JobOrderId = cjo.JobOrderId,
+                ConfigId = cfg.Id,
+                Milestone = milestone,
+                BaseAmount = baseAmount,
+                CommissionAmount = amount,
+                Status = CommissionStatus.Pending,
+            };
+            db.AgentCommissions.Add(commission);
+            db.AddAudit(actorId, "create", "agent_commissions", commission.Id, null, new
+            {
+                commission.AgentId,
+                commission.CandidateId,
+                commission.JobOrderId,
+                commission.ConfigId,
+                commission.Milestone,
+                commission.BaseAmount,
+                commission.CommissionAmount,
+                commission.Status,
+            });
+            created++;
+        }
+        return created;
+    }
+
+    private async Task<bool> HasPermission(string permission)
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var result = await AuthorizationService.AuthorizeAsync(authState.User, null, permission);
+        return result.Succeeded;
+    }
+
+    private RenderFragment Field(string label, string? value) =>@<MudItem xs="6">
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">@label</MudText>
+        <MudText Typo="Typo.body2">@(string.IsNullOrWhiteSpace(value) ? "—" : value)</MudText>
+    </MudItem>;
+
+    private static string FormatFileSize(long bytes)
+    {
+        if (bytes >= 1024 * 1024)
+            return $"{bytes / 1024d / 1024d:N1} MB";
+        if (bytes >= 1024)
+            return $"{bytes / 1024d:N1} KB";
+        return $"{bytes:N0} B";
+    }
+}

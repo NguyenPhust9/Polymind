@@ -1,0 +1,728 @@
+@page "/admin"
+@attribute [Authorize(Policy = "users:read")]
+@using Microsoft.AspNetCore.Identity
+@using Polymind.Infrastructure.Identity
+@using Polymind.Infrastructure.Persistence.Constants
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject UserManager<ApplicationUser> UserManager
+@inject AuthenticationStateProvider AuthState
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<PageTitle>Quản trị hệ thống — POLYMIND</PageTitle>
+
+<PageHeader Eyebrow="HỆ THỐNG" Title="Quản trị hệ thống" Subtitle="Tài khoản, phân quyền và nhật ký thao tác">
+    <Actions>
+        <MudButton StartIcon="@Icons.Material.Filled.Refresh" Variant="Variant.Outlined" OnClick="LoadAsync">Tải lại</MudButton>
+    </Actions>
+</PageHeader>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudTabs Elevation="1" Rounded="true">
+        <MudTabPanel Text="Tài khoản">
+            <AuthorizeView Policy="users:create">
+                <Authorized>
+                    <MudPaper Class="pa-4 mb-4" Elevation="0" Outlined="true">
+                        <MudText Typo="Typo.subtitle1" Class="mb-3"><b>Tạo tài khoản</b></MudText>
+                        <MudGrid>
+                            <MudItem xs="12" md="3">
+                                <MudTextField @bind-Value="_newEmail" Label="Email" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                            </MudItem>
+                            <MudItem xs="12" md="3">
+                                <MudTextField @bind-Value="_newFullName" Label="Họ tên" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                            </MudItem>
+                            <MudItem xs="12" md="3">
+                                <MudSelect T="string" @bind-Value="_newRole" Label="Vai trò" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                    @foreach (var role in _roles)
+                                    {
+                                        <MudSelectItem Value="@(role.Name ?? "")">@RoleDisplay(role)</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" md="2">
+                                <MudTextField @bind-Value="_newPassword" Label="Mật khẩu" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                            </MudItem>
+                            <MudItem xs="12" md="1" Class="d-flex align-center">
+                                <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="CreateUserAsync">Tạo</MudButton>
+                            </MudItem>
+                        </MudGrid>
+                    </MudPaper>
+                </Authorized>
+            </AuthorizeView>
+
+            <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">Mỗi vai trò có một bảng riêng để dễ quản lý tài khoản.</MudText>
+
+            @foreach (var grp in GroupedUsers())
+            {
+                <MudPaper Class="pa-3 mb-4" Elevation="0" Outlined="true">
+                    <div class="d-flex align-center flex-wrap mb-2" style="gap:8px">
+                        <MudIcon Icon="@grp.Icon" Color="@grp.Color" />
+                        <MudText Typo="Typo.subtitle1"><b>@grp.Label</b></MudText>
+                        <MudChip T="string" Size="Size.Small" Color="@grp.Color">@grp.Users.Count tài khoản</MudChip>
+                    </div>
+
+                    @if (grp.Users.Count == 0)
+                    {
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary">Chưa có tài khoản nào ở vai trò này.</MudText>
+                    }
+                    else
+                    {
+                        <MudHidden Breakpoint="Breakpoint.SmAndDown">
+                            <div class="table-scroll-x">
+                                <MudSimpleTable Dense="true" Hover="true" Striped="true">
+                                    <thead>
+                                        <tr>
+                                            <th>Email</th>
+                                            <th>Họ tên</th>
+                                            <th>Chuyển vai trò</th>
+                                            <th>Trạng thái</th>
+                                            <th style="text-align:right">Thao tác</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var user in grp.Users)
+                                        {
+                                            <tr>
+                                                <td>@user.Email</td>
+                                                <td>@user.FullName</td>
+                                                <td style="min-width:220px">
+                                                    @if (IsSuperAdminRow(user))
+                                                    {
+                                                        @* Không ai được đổi role của một super admin — kể cả super admin khác. Chỉ dùng nút Sửa. *@
+                                                        <MudTooltip Text="Không thể chuyển vai trò của Super Admin — chỉ được sửa thông tin qua nút Sửa.">
+                                                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Icon="@Icons.Material.Filled.Lock">Cố định</MudChip>
+                                                        </MudTooltip>
+                                                    }
+                                                    else
+                                                    {
+                                                        <MudSelect T="string" @bind-Value="user.SelectedRole" Dense="true" Margin="Margin.Dense">
+                                                            @foreach (var role in _roles)
+                                                            {
+                                                                <MudSelectItem Value="@(role.Name ?? "")">@RoleDisplay(role)</MudSelectItem>
+                                                            }
+                                                        </MudSelect>
+                                                    }
+                                                </td>
+                                                <td>
+                                                    <MudChip T="string" Size="Size.Small" Color="@(user.IsActive ? Color.Success : Color.Error)">
+                                                        @(user.IsActive ? "Đang hoạt động" : "Đã khóa")
+                                                    </MudChip>
+                                                </td>
+                                                <td style="text-align:right;white-space:nowrap">
+                                                    <AuthorizeView Roles="super_admin">
+                                                        <Authorized>
+                                                            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Edit" OnClick="@(() => OpenEditUserAsync(user))">Sửa</MudButton>
+                                                        </Authorized>
+                                                    </AuthorizeView>
+                                                    <AuthorizeView Policy="users:update">
+                                                        <Authorized>
+                                                            @if (!IsSuperAdminRow(user))
+                                                            {
+                                                                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => SaveUserRoleAsync(user))">Lưu role</MudButton>
+                                                            }
+                                                            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => ToggleUserAsync(user))">
+                                                                @(user.IsActive ? "Khóa" : "Mở")
+                                                            </MudButton>
+                                                        </Authorized>
+                                                    </AuthorizeView>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </MudSimpleTable>
+                            </div>
+                        </MudHidden>
+
+                        <MudHidden Breakpoint="Breakpoint.SmAndDown" Invert="true">
+                            @foreach (var user in grp.Users)
+                            {
+                                <MudPaper Class="mobile-card pa-3" Elevation="0">
+                                    <div class="d-flex justify-space-between align-center" style="gap:8px">
+                                        <div style="min-width:0">
+                                            <MudText Typo="Typo.subtitle2" Style="font-weight:600">@user.FullName</MudText>
+                                            <MudText Typo="Typo.caption" Class="mud-text-secondary">@user.Email</MudText>
+                                        </div>
+                                        <MudChip T="string" Size="Size.Small" Color="@(user.IsActive ? Color.Success : Color.Error)">@(user.IsActive ? "Đang hoạt động" : "Đã khóa")</MudChip>
+                                    </div>
+                                    @if (IsSuperAdminRow(user))
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Icon="@Icons.Material.Filled.Lock" Class="mt-2">Vai trò cố định — chỉ sửa qua nút Sửa</MudChip>
+                                    }
+                                    else
+                                    {
+                                        <MudSelect T="string" @bind-Value="user.SelectedRole" Dense="true" Margin="Margin.Dense" Label="Chuyển vai trò" Class="mt-2">
+                                            @foreach (var role in _roles)
+                                            {
+                                                <MudSelectItem Value="@(role.Name ?? "")">@RoleDisplay(role)</MudSelectItem>
+                                            }
+                                        </MudSelect>
+                                    }
+                                    <div class="d-flex flex-wrap justify-end mt-2" style="gap:4px">
+                                        <AuthorizeView Roles="super_admin">
+                                            <Authorized>
+                                                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Edit" OnClick="@(() => OpenEditUserAsync(user))">Sửa</MudButton>
+                                            </Authorized>
+                                        </AuthorizeView>
+                                        <AuthorizeView Policy="users:update">
+                                            <Authorized>
+                                                @if (!IsSuperAdminRow(user))
+                                                {
+                                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => SaveUserRoleAsync(user))">Lưu role</MudButton>
+                                                }
+                                                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => ToggleUserAsync(user))">@(user.IsActive ? "Khóa" : "Mở")</MudButton>
+                                            </Authorized>
+                                        </AuthorizeView>
+                                    </div>
+                                </MudPaper>
+                            }
+                        </MudHidden>
+                    }
+                </MudPaper>
+            }
+        </MudTabPanel>
+
+        <MudTabPanel Text="Phân quyền">
+            <AuthorizeView Policy="roles:update">
+                <Authorized>
+                    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+                        Cách dùng: chọn <b>vai trò</b> cần chỉnh, rồi tích vào những việc vai trò đó được phép làm và bấm <b>Lưu phân quyền</b>.
+                        Mỗi <b>dòng</b> là một mục dữ liệu trong hệ thống; mỗi <b>cột</b> là một việc có thể làm với mục đó (Xem, Thêm, Sửa, Xóa, Phê duyệt).
+                    </MudAlert>
+
+                    <MudGrid Class="align-center">
+                        <MudItem xs="12" md="5">
+                            <MudSelect T="Guid" Value="_selectedRoleId" ValueChanged="OnRoleChangedAsync" Label="Chọn vai trò để chỉnh quyền" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                @foreach (var role in _roles)
+                                {
+                                    <MudSelectItem Value="@role.Id">@RoleDisplay(role)</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" md="7" Class="d-flex align-center justify-end flex-wrap" style="gap:12px">
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary">Đang chọn <b>@_selectedPermissionIds.Count</b> quyền</MudText>
+                            <MudButton StartIcon="@Icons.Material.Filled.Save" Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveRolePermissionsAsync" Disabled="_isSuperAdminRoleSelected">Lưu phân quyền</MudButton>
+                        </MudItem>
+                    </MudGrid>
+
+                    @if (_isSuperAdminRoleSelected)
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
+                            Vai trò <b>Quyền cao nhất (super admin)</b> luôn có toàn bộ quyền và được hệ thống tự khôi phục mỗi lần khởi động — bạn không cần (và không nên) chỉnh ở đây.
+                        </MudAlert>
+                    }
+
+                    <div class="table-scroll-x mt-3">
+                    <MudSimpleTable Dense="true" Hover="true" Bordered="true">
+                        <thead>
+                            <tr>
+                                <th style="min-width:230px">Mục dữ liệu</th>
+                                @foreach (var action in PermissionLabels.ActionOrder)
+                                {
+                                    <th style="text-align:center" title="@PermissionLabels.ActionHint(action)">@PermissionLabels.Action(action)</th>
+                                }
+                                <th style="text-align:center;min-width:96px">Cả dòng</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var resource in _resourcesOrdered)
+                            {
+                                <tr>
+                                    <td><b>@PermissionLabels.Resource(resource)</b></td>
+                                    @foreach (var action in PermissionLabels.ActionOrder)
+                                    {
+                                        <td style="text-align:center">
+                                            @if (_permByKey.TryGetValue((resource, action), out var pid))
+                                            {
+                                                <MudCheckBox T="bool"
+                                                             Value="@_selectedPermissionIds.Contains(pid)"
+                                                             ValueChanged="@((bool v) => TogglePermission(pid, v))"
+                                                             Disabled="_isSuperAdminRoleSelected"
+                                                             Dense="true" />
+                                            }
+                                            else
+                                            {
+                                                <span class="mud-text-secondary">—</span>
+                                            }
+                                        </td>
+                                    }
+                                    <td style="text-align:center">
+                                        <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => ToggleResource(resource))" Disabled="_isSuperAdminRoleSelected">Chọn / Bỏ</MudButton>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                    </div>
+
+                    <MudExpansionPanels Class="mt-3" Elevation="0">
+                        <MudExpansionPanel Text="Chú thích ý nghĩa từng cột quyền">
+                            <ul style="margin:0;padding-left:20px">
+                                @foreach (var action in PermissionLabels.ActionOrder)
+                                {
+                                    <li class="mb-1"><b>@PermissionLabels.Action(action):</b> @PermissionLabels.ActionHint(action)</li>
+                                }
+                            </ul>
+                        </MudExpansionPanel>
+                    </MudExpansionPanels>
+                </Authorized>
+                <NotAuthorized>
+                    <MudAlert Severity="Severity.Warning">Bạn không có quyền cập nhật phân quyền.</MudAlert>
+                </NotAuthorized>
+            </AuthorizeView>
+        </MudTabPanel>
+
+        <MudTabPanel Text="Nhật ký thao tác">
+            <AuthorizeView Policy="audit:read">
+                <Authorized>
+                    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+                        Nhật ký này giúp quản trị viên biết <b>ai đã làm gì, ở mục nào, lúc nào</b>. Các mã kỹ thuật chỉ dùng để đối chiếu khi cần kiểm tra sâu.
+                    </MudAlert>
+                    <MudGrid Class="mb-3">
+                        <MudItem xs="12" md="3">
+                            <MudTextField @bind-Value="_auditResource" Label="Lọc theo khu vực" Placeholder="VD: tài khoản, ứng viên..." Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12" md="3">
+                            <MudTextField @bind-Value="_auditAction" Label="Lọc theo thao tác" Placeholder="VD: thêm, sửa, duyệt..." Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12" md="2" Class="d-flex align-center">
+                            <MudButton Variant="Variant.Outlined" OnClick="LoadAuditAsync">Lọc</MudButton>
+                        </MudItem>
+                    </MudGrid>
+                    <div class="table-scroll-x">
+                    <MudSimpleTable Dense="true" Hover="true" Striped="true">
+                        <thead>
+                            <tr>
+                                <th>Thời gian</th>
+                                <th>Người thực hiện</th>
+                                <th>Việc đã làm</th>
+                                <th>Khu vực</th>
+                                <th>Ghi chú</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var log in _auditLogs)
+                            {
+                                <tr>
+                                    <td>@log.CreatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm")</td>
+                                    <td>@log.UserName</td>
+                                    <td><MudChip T="string" Size="Size.Small" Color="@log.ActionColor">@log.ActionLabel</MudChip></td>
+                                    <td>@log.ResourceLabel</td>
+                                    <td>
+                                        <MudText Typo="Typo.body2">@log.Summary</MudText>
+                                        @if (!string.IsNullOrWhiteSpace(log.TechnicalId))
+                                        {
+                                            <MudText Typo="Typo.caption" Class="mud-text-secondary">Mã kỹ thuật: @log.TechnicalId</MudText>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                    </div>
+                </Authorized>
+                <NotAuthorized>
+                    <MudAlert Severity="Severity.Warning">Bạn không có quyền xem nhật ký thao tác.</MudAlert>
+                </NotAuthorized>
+            </AuthorizeView>
+        </MudTabPanel>
+    </MudTabs>
+}
+
+@code {
+    private bool _loading = true;
+    private List<UserRow> _users = new();
+    private List<ApplicationRole> _roles = new();
+    private List<Permission> _permissions = new();
+    private Dictionary<(string Resource, string Action), Guid> _permByKey = new();
+    private List<string> _resourcesOrdered = new();
+    private HashSet<Guid> _selectedPermissionIds = new();
+    private Guid _selectedRoleId;
+
+    private bool _isSuperAdminRoleSelected
+        => _roles.FirstOrDefault(r => r.Id == _selectedRoleId)?.Name == RoleNames.SuperAdmin;
+    private List<AuditRow> _auditLogs = new();
+    private string? _auditResource;
+    private string? _auditAction;
+    private string _newEmail = "";
+    private string _newFullName = "";
+    private string _newPassword = DbSeeder.DefaultAdminPassword;
+    private string? _newRole;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _roles = await db.Roles.OrderBy(r => r.Name).ToListAsync();
+        _permissions = await db.Permissions.OrderBy(p => p.Resource).ThenBy(p => p.Action).ToListAsync();
+        _permByKey = _permissions.ToDictionary(p => (p.Resource, p.Action), p => p.Id);
+        _resourcesOrdered = _permissions.Select(p => p.Resource).Distinct()
+            .OrderBy(PermissionLabels.ResourceRank).ThenBy(r => r).ToList();
+        _newRole ??= _roles.FirstOrDefault()?.Name;
+        _selectedRoleId = _selectedRoleId == Guid.Empty ? _roles.FirstOrDefault()?.Id ?? Guid.Empty : _selectedRoleId;
+        await LoadUsersAsync();
+        await LoadRolePermissionsAsync();
+        await LoadAuditAsync();
+        _loading = false;
+    }
+
+    private async Task LoadUsersAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var users = await db.Users.OrderBy(u => u.Email).ToListAsync();
+        _users.Clear();
+        foreach (var user in users)
+        {
+            var roles = await UserManager.GetRolesAsync(user);
+            _users.Add(new UserRow
+            {
+                Id = user.Id,
+                Email = user.Email ?? user.UserName ?? "",
+                FullName = user.FullName,
+                IsActive = user.IsActive,
+                Roles = roles.ToList(),
+                PrimaryRole = roles.FirstOrDefault(),
+                SelectedRole = roles.FirstOrDefault() ?? _roles.FirstOrDefault()?.Name,
+            });
+        }
+    }
+
+    private async Task CreateUserAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newEmail) || string.IsNullOrWhiteSpace(_newFullName))
+        {
+            Snackbar.Add("Vui lòng nhập email và họ tên.", Severity.Warning);
+            return;
+        }
+
+        var user = new ApplicationUser
+        {
+            UserName = _newEmail.Trim(),
+            Email = _newEmail.Trim(),
+            EmailConfirmed = true,
+            FullName = _newFullName.Trim(),
+            IsActive = true,
+        };
+        var result = await UserManager.CreateAsync(user, string.IsNullOrWhiteSpace(_newPassword) ? DbSeeder.DefaultAdminPassword : _newPassword);
+        if (!result.Succeeded)
+        {
+            Snackbar.Add(string.Join("; ", result.Errors.Select(e => e.Description)), Severity.Error);
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_newRole))
+            await UserManager.AddToRoleAsync(user, _newRole);
+
+        await AddAuditAsync("create", "users", user.Id, null, new { user.Email, user.FullName, Role = _newRole });
+        _newEmail = "";
+        _newFullName = "";
+        _newPassword = DbSeeder.DefaultAdminPassword;
+        await LoadUsersAsync();
+        Snackbar.Add("Đã tạo tài khoản.", Severity.Success);
+    }
+
+    private async Task OpenEditUserAsync(UserRow row)
+    {
+        var parameters = new DialogParameters<UserEditDialog> { { x => x.UserId, row.Id } };
+        var dialog = await DialogService.ShowAsync<UserEditDialog>($"Sửa tài khoản — {row.FullName}", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+            await LoadUsersAsync();
+    }
+
+    // Tài khoản đang giữ role super admin: vai trò cố định, không ai đổi được từ UI (kể cả super admin khác).
+    private static bool IsSuperAdminRow(UserRow row) => row.Roles.Contains(RoleNames.SuperAdmin);
+
+    private async Task SaveUserRoleAsync(UserRow row)
+    {
+        var user = await UserManager.FindByIdAsync(row.Id.ToString());
+        if (user is null || string.IsNullOrWhiteSpace(row.SelectedRole)) return;
+
+        if (IsSuperAdminRow(row))
+        {
+            Snackbar.Add("Không thể chuyển vai trò của Super Admin — chỉ được sửa thông tin qua nút Sửa.", Severity.Warning);
+            return;
+        }
+
+        var oldRoles = await UserManager.GetRolesAsync(user);
+        if (oldRoles.Count == 1 && oldRoles[0] == row.SelectedRole)
+        {
+            Snackbar.Add("Vai trò không thay đổi.", Severity.Info);
+            return;
+        }
+
+        // Thao tác nhạy cảm (góp ý Vietgroup): bắt nhập lại mật khẩu của người thao tác trước khi đổi quyền.
+        var roleLabel = RoleNames.All.GetValueOrDefault(row.SelectedRole, row.SelectedRole);
+        var parameters = new DialogParameters<ConfirmPasswordDialog>
+        {
+            { x => x.Message, $"Bạn sắp đổi vai trò của \"{row.FullName}\" ({row.Email}) thành \"{roleLabel}\". Thao tác này thay đổi toàn bộ quyền truy cập của tài khoản." },
+        };
+        var dialog = await DialogService.ShowAsync<ConfirmPasswordDialog>("Xác nhận đổi vai trò", parameters);
+        var result = await dialog.Result;
+        if (result is null || result.Canceled) return;
+
+        await UserManager.RemoveFromRolesAsync(user, oldRoles);
+        await UserManager.AddToRoleAsync(user, row.SelectedRole);
+        await AddAuditAsync("update_role", "users", user.Id, new { Roles = oldRoles }, new { Role = row.SelectedRole });
+        await LoadUsersAsync();
+        Snackbar.Add("Đã cập nhật vai trò.", Severity.Success);
+    }
+
+    private async Task ToggleUserAsync(UserRow row)
+    {
+        var user = await UserManager.FindByIdAsync(row.Id.ToString());
+        if (user is null) return;
+        var old = user.IsActive;
+        user.IsActive = !user.IsActive;
+        var result = await UserManager.UpdateAsync(user);
+        if (!result.Succeeded)
+        {
+            Snackbar.Add(string.Join("; ", result.Errors.Select(e => e.Description)), Severity.Error);
+            return;
+        }
+        await AddAuditAsync(user.IsActive ? "unlock" : "lock", "users", user.Id, new { IsActive = old }, new { user.IsActive });
+        await LoadUsersAsync();
+        Snackbar.Add(user.IsActive ? "Đã mở khóa tài khoản." : "Đã khóa tài khoản.", Severity.Success);
+    }
+
+    private async Task OnRoleChangedAsync(Guid roleId)
+    {
+        _selectedRoleId = roleId;
+        await LoadRolePermissionsAsync();
+    }
+
+    private async Task LoadRolePermissionsAsync()
+    {
+        if (_selectedRoleId == Guid.Empty)
+        {
+            _selectedPermissionIds.Clear();
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _selectedPermissionIds = (await db.RolePermissions
+            .Where(rp => rp.RoleId == _selectedRoleId)
+            .Select(rp => rp.PermissionId)
+            .ToListAsync()).ToHashSet();
+    }
+
+    private void TogglePermission(Guid permissionId, bool enabled)
+    {
+        if (enabled) _selectedPermissionIds.Add(permissionId);
+        else _selectedPermissionIds.Remove(permissionId);
+    }
+
+    // Tích/bỏ tất cả quyền của một mục dữ liệu (cả dòng). Nếu đã chọn hết thì bỏ hết, ngược lại chọn hết.
+    private void ToggleResource(string resource)
+    {
+        var ids = PermissionLabels.ActionOrder
+            .Where(a => _permByKey.ContainsKey((resource, a)))
+            .Select(a => _permByKey[(resource, a)])
+            .ToList();
+        if (ids.Count == 0) return;
+        var allSelected = ids.All(_selectedPermissionIds.Contains);
+        foreach (var id in ids)
+        {
+            if (allSelected) _selectedPermissionIds.Remove(id);
+            else _selectedPermissionIds.Add(id);
+        }
+    }
+
+    private async Task SaveRolePermissionsAsync()
+    {
+        if (_selectedRoleId == Guid.Empty) return;
+        if (_isSuperAdminRoleSelected)
+        {
+            Snackbar.Add("Không cần chỉnh quyền cho super admin — vai trò này luôn có toàn quyền.", Severity.Info);
+            return;
+        }
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var existing = await db.RolePermissions.Where(rp => rp.RoleId == _selectedRoleId).ToListAsync();
+        var oldIds = existing.Select(rp => rp.PermissionId).ToHashSet();
+        var toRemove = existing.Where(rp => !_selectedPermissionIds.Contains(rp.PermissionId)).ToList();
+        var toAdd = _selectedPermissionIds
+            .Where(id => !oldIds.Contains(id))
+            .Select(id => new RolePermission { RoleId = _selectedRoleId, PermissionId = id })
+            .ToList();
+        if (toRemove.Count > 0) db.RolePermissions.RemoveRange(toRemove);
+        if (toAdd.Count > 0) db.RolePermissions.AddRange(toAdd);
+        db.AddAudit(await AuthState.GetUserIdAsync(), "update", "role_permissions", _selectedRoleId,
+            new { PermissionIds = oldIds }, new { PermissionIds = _selectedPermissionIds });
+        await db.SaveChangesAsync();
+        Snackbar.Add("Đã lưu phân quyền vai trò.", Severity.Success);
+    }
+
+    private async Task LoadAuditAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var query = db.AuditLogs.AsQueryable();
+        var resourceFilter = NormalizeAuditFilter(_auditResource);
+        var actionFilter = NormalizeAuditFilter(_auditAction);
+        if (!string.IsNullOrWhiteSpace(resourceFilter))
+            query = query.Where(a => a.Resource.Contains(resourceFilter) || a.Resource.Contains(_auditResource!));
+        if (!string.IsNullOrWhiteSpace(actionFilter))
+            query = query.Where(a => a.Action.Contains(actionFilter) || a.Action.Contains(_auditAction!));
+
+        var logs = await query.OrderByDescending(a => a.CreatedAt).Take(200).ToListAsync();
+        var userNames = await db.Users.ToDictionaryAsync(u => u.Id, u => u.FullName);
+        _auditLogs = logs.Select(a => new AuditRow(
+            a.CreatedAt,
+            a.UserId is null ? "Hệ thống" : userNames.GetValueOrDefault(a.UserId.Value, "—"),
+            AuditActionLabel(a.Action),
+            AuditResourceLabel(a.Resource),
+            AuditSummary(a.Action, a.Resource),
+            AuditActionColor(a.Action),
+            ShortTechnicalId(a.ResourceId))).ToList();
+    }
+
+    private async Task AddAuditAsync(string action, string resource, Guid resourceId, object? oldValue, object? newValue)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        db.AddAudit(await AuthState.GetUserIdAsync(), action, resource, resourceId, oldValue, newValue);
+        await db.SaveChangesAsync();
+    }
+
+    private static string RoleDisplay(ApplicationRole role)
+        => $"{role.Name} — {RoleNames.All.GetValueOrDefault(role.Name ?? "", role.Description ?? "")}";
+
+    // Thứ tự + nhãn/icon/màu hiển thị cho từng bảng vai trò (cao → thấp).
+    private static readonly (string Role, string Label, string Icon, Color Color)[] RoleOrder =
+    {
+        (RoleNames.SuperAdmin, "Quyền cao nhất (Super Admin)", Icons.Material.Filled.Shield, Color.Error),
+        (RoleNames.Director, "Giám đốc", Icons.Material.Filled.Star, Color.Warning),
+        (RoleNames.RecruitmentManager, "Trưởng phòng tuyển dụng", Icons.Material.Filled.SupervisorAccount, Color.Primary),
+        (RoleNames.Recruiter, "Nhân viên tuyển dụng", Icons.Material.Filled.PersonSearch, Color.Info),
+        (RoleNames.Consultant, "Tư vấn viên", Icons.Material.Filled.SupportAgent, Color.Secondary),
+        (RoleNames.DocumentStaff, "Bộ phận hồ sơ", Icons.Material.Filled.FolderShared, Color.Secondary),
+        (RoleNames.VisaStaff, "Bộ phận visa", Icons.Material.Filled.FlightTakeoff, Color.Tertiary),
+        (RoleNames.Accountant, "Kế toán", Icons.Material.Filled.AccountBalance, Color.Success),
+        (RoleNames.Agent, "Đại lý", Icons.Material.Filled.Handshake, Color.Dark),
+        (RoleNames.Collaborator, "Cộng tác viên", Icons.Material.Filled.Diversity3, Color.Secondary),
+    };
+
+    private IEnumerable<(string Key, string Label, string Icon, Color Color, List<UserRow> Users)> GroupedUsers()
+    {
+        foreach (var (role, label, icon, color) in RoleOrder)
+            yield return (role, label, icon, color, _users.Where(u => u.PrimaryRole == role).ToList());
+
+        var known = RoleOrder.Select(r => r.Role).ToHashSet();
+        var others = _users.Where(u => u.PrimaryRole is null || !known.Contains(u.PrimaryRole)).ToList();
+        if (others.Count > 0)
+            yield return ("", "Chưa gán vai trò", Icons.Material.Filled.HelpOutline, Color.Default, others);
+    }
+
+    private sealed class UserRow
+    {
+        public Guid Id { get; set; }
+        public string Email { get; set; } = "";
+        public string FullName { get; set; } = "";
+        public bool IsActive { get; set; }
+        public List<string> Roles { get; set; } = new();
+        public string? PrimaryRole { get; set; }
+        public string? SelectedRole { get; set; }
+    }
+
+    private static string AuditActionLabel(string action) => action switch
+    {
+        "create" => "Thêm mới",
+        "update" => "Cập nhật",
+        "delete" => "Xóa",
+        "approve" => "Duyệt",
+        "mark_paid" => "Đánh dấu đã chi",
+        "create_receipt" => "Tạo phiếu",
+        "assign" => "Gắn vào đơn hàng",
+        "advance_step" => "Chuyển bước",
+        "update_role" => "Đổi vai trò",
+        "lock" => "Khóa tài khoản",
+        "unlock" => "Mở tài khoản",
+        "reset_password" => "Reset mật khẩu",
+        "upload_version" => "Tải hồ sơ lên",
+        "restore_version" => "Khôi phục hồ sơ",
+        _ => HumanizeTechnicalName(action)
+    };
+
+    private static string AuditResourceLabel(string resource) => resource switch
+    {
+        "users" => "Tài khoản",
+        "roles" => "Vai trò",
+        "role_permissions" => "Phân quyền",
+        "leads" => "Lead",
+        "candidates" => "Ứng viên",
+        "candidate_job_orders" => "Quy trình ứng viên",
+        "candidate_documents" => "Hồ sơ ứng viên",
+        "job_orders" => "Đơn hàng",
+        "payments" => "Khoản thu",
+        "expenses" => "Khoản chi",
+        "receipts" => "Phiếu thu/chi",
+        "agents" => "Đại lý",
+        "collaborators" => "Cộng tác viên",
+        "agent_commissions" => "Hoa hồng",
+        "agent_commission_configs" => "Cấu hình hoa hồng",
+        "loans" => "Hỗ trợ vay",
+        "visas" => "Visa",
+        "flights" => "Xuất cảnh",
+        "notifications" => "Thông báo",
+        "messages" => "Tin nhắn",
+        _ => HumanizeTechnicalName(resource)
+    };
+
+    private static string AuditSummary(string action, string resource)
+        => $"{AuditActionLabel(action)} trong mục {AuditResourceLabel(resource).ToLowerInvariant()}.";
+
+    private static Color AuditActionColor(string action) => action switch
+    {
+        "create" or "unlock" => Color.Success,
+        "update" or "update_role" or "assign" or "advance_step" or "upload_version" or "restore_version" => Color.Info,
+        "approve" or "mark_paid" or "create_receipt" => Color.Primary,
+        "delete" or "lock" => Color.Error,
+        "reset_password" => Color.Warning,
+        _ => Color.Default
+    };
+
+    private static string? ShortTechnicalId(Guid? id)
+        => id is null ? null : id.Value.ToString("N")[..8].ToUpperInvariant();
+
+    private static string NormalizeAuditFilter(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "";
+        var text = value.Trim().ToLowerInvariant();
+        return text switch
+        {
+            "tài khoản" or "tai khoan" or "user" => "users",
+            "ứng viên" or "ung vien" => "candidates",
+            "lead" => "leads",
+            "đơn hàng" or "don hang" or "job" => "job_orders",
+            "khoản thu" or "khoan thu" or "thu" => "payments",
+            "khoản chi" or "khoan chi" or "chi" => "expenses",
+            "hoa hồng" or "hoa hong" => "agent_commissions",
+            "thêm" or "them" => "create",
+            "sửa" or "sua" or "cập nhật" or "cap nhat" => "update",
+            "xóa" or "xoa" => "delete",
+            "duyệt" or "duyet" => "approve",
+            _ => text
+        };
+    }
+
+    private static string HumanizeTechnicalName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "Không rõ";
+        var text = value.Replace('_', ' ').Replace('-', ' ').Trim();
+        return string.Join(' ', text.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(word => word.Length == 0 ? word : char.ToUpperInvariant(word[0]) + word[1..]));
+    }
+
+    private sealed record AuditRow(
+        DateTimeOffset CreatedAt,
+        string UserName,
+        string ActionLabel,
+        string ResourceLabel,
+        string Summary,
+        Color ActionColor,
+        string? TechnicalId);
+}

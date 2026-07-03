@@ -1,0 +1,312 @@
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject IAuthorizationService AuthorizationService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudGrid>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_model.FullName" Label="Họ tên *" Variant="Variant.Outlined" Margin="Margin.Dense" Required="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_model.Phone" Label="Số điện thoại" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudDatePicker @bind-Date="_dob" Label="Ngày sinh" Variant="Variant.Outlined" Margin="Margin.Dense" DateFormat="dd/MM/yyyy" MaxDate="DateTime.Today" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="Gender?" @bind-Value="_model.Gender" Label="Giới tính" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                    @foreach (var g in Enum.GetValues<Gender>())
+                    {
+                        <MudSelectItem T="Gender?" Value="@g">@Labels.Vi(g)</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_model.Cccd" Label="CCCD" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <AuthorizeView Roles="super_admin">
+                <Authorized>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_model.Email" Label="Email" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                </Authorized>
+            </AuthorizeView>
+            <MudItem xs="12" sm="6">
+                <MudAutocomplete T="string" @bind-Value="_model.Province" Label="Tỉnh/Thành phố"
+                                 SearchFunc="SearchProvince" CoerceValue="true" ResetValueOnEmptyText="false"
+                                 Clearable="true" MaxItems="40" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_model.Address" Label="Địa chỉ" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <AuthorizeView Roles="super_admin">
+                <Authorized>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_model.Occupation" Label="Nghề nghiệp hiện tại" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_model.EducationLevel" Label="Trình độ học vấn" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_model.WorkExperience" Label="Kinh nghiệm làm việc" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_model.Languages" Label="Ngoại ngữ" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                </Authorized>
+            </AuthorizeView>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="LeadSource" @bind-Value="_model.Source" Label="Nguồn" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    @foreach (var s in Enum.GetValues<LeadSource>())
+                    {
+                        <MudSelectItem Value="@s">@Labels.Vi(s)</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            @if (_model.Source == LeadSource.Referral)
+            {
+                <MudItem xs="12" sm="6">
+                    <MudAutocomplete T="Collaborator" Value="_selectedCtv" ValueChanged="OnCtvChanged"
+                                     Label="Cộng tác viên giới thiệu (CTV)" SearchFunc="SearchCtv"
+                                     ToStringFunc="@(c => c is null ? string.Empty : $"{c.FullName} ({c.Code})")"
+                                     Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" ResetValueOnEmptyText="true"
+                                     Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Diversity3" MaxItems="30" />
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">Gõ tên để tìm CTV. Khi lưu, Nguồn sẽ hiển thị dạng "CTV-&lt;tên&gt;".</MudText>
+                </MudItem>
+            }
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_model.TargetCountry" Label="Quốc gia mong muốn" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="Guid?" @bind-Value="_model.InterestedJobOrderId" Label="Đơn hàng quan tâm" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true">
+                    @foreach (var j in _jobOrders)
+                    {
+                        <MudSelectItem T="Guid?" Value="@j.Id">@j.Code — @j.Country</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="Guid?" @bind-Value="_model.AssignedTo" Label="Tư vấn viên" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true"
+                           Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.SupportAgent">
+                    @foreach (var u in _consultants)
+                    {
+                        <MudSelectItem T="Guid?" Value="@u.Id">@u.FullName</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_model.Notes" Label="Ghi chú" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Hủy</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="_saving">Lưu</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    /// <summary>Null = tạo mới; có giá trị = sửa lead hiện có.</summary>
+    [Parameter] public Guid? LeadId { get; set; }
+
+    private Lead _model = new() { FullName = "", Source = LeadSource.Hotline };
+    private DateTime? _dob;
+    private bool _saving;
+    private bool _canEditSensitiveProfile;
+    private bool IsEdit => LeadId is not null;
+
+    private record JobOrderOption(Guid Id, string Code, string Country);
+    private record UserOption(Guid Id, string FullName);
+    private List<JobOrderOption> _jobOrders = new();
+    private List<UserOption> _consultants = new();
+    private List<Collaborator> _collaborators = new();
+    private Collaborator? _selectedCtv;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        _canEditSensitiveProfile = authState.User.IsInRole(Polymind.Infrastructure.Persistence.Constants.RoleNames.SuperAdmin);
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _jobOrders = await db.JobOrders
+            .Where(j => j.Status != JobOrderStatus.Cancelled)
+            .OrderByDescending(j => j.CreatedAt)
+            .Select(j => new JobOrderOption(j.Id, j.Code, j.Country)).ToListAsync();
+
+        // Người phụ trách lead = tư vấn viên (role consultant).
+        var consultantRoleId = await db.Roles
+            .Where(r => r.Name == Polymind.Infrastructure.Persistence.Constants.RoleNames.Consultant)
+            .Select(r => r.Id).FirstOrDefaultAsync();
+        _consultants = await db.Users
+            .Where(u => u.IsActive && db.UserRoles.Any(ur => ur.UserId == u.Id && ur.RoleId == consultantRoleId))
+            .OrderBy(u => u.FullName)
+            .Select(u => new UserOption(u.Id, u.FullName)).ToListAsync();
+
+        _collaborators = await db.Collaborators.Where(c => c.IsActive).OrderBy(c => c.FullName).ToListAsync();
+
+        if (LeadId is null) return;
+        var lead = await db.Leads.AsNoTracking().FirstOrDefaultAsync(l => l.Id == LeadId);
+        if (lead is null) return;
+
+        _model = lead;
+        _dob = lead.Dob?.ToDateTime(TimeOnly.MinValue);
+        _selectedCtv = lead.CollaboratorId is null
+            ? null
+            : _collaborators.FirstOrDefault(c => c.Id == lead.CollaboratorId.Value);
+    }
+
+    private Task<IEnumerable<Collaborator>> SearchCtv(string value, CancellationToken token)
+    {
+        IEnumerable<Collaborator> result = string.IsNullOrWhiteSpace(value)
+            ? _collaborators
+            : _collaborators.Where(c => c.FullName.Contains(value, StringComparison.OrdinalIgnoreCase)
+                                        || c.Code.Contains(value, StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(result);
+    }
+
+    private void OnCtvChanged(Collaborator? c)
+    {
+        _selectedCtv = c;
+        _model.CollaboratorId = c?.Id;
+    }
+
+    private Task<IEnumerable<string>> SearchProvince(string value, CancellationToken token)
+        => Task.FromResult(VietnamProvinces.Search(value));
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task Save()
+    {
+        if (string.IsNullOrWhiteSpace(_model.FullName)) return;
+        var permission = IsEdit ? "leads:update" : "leads:create";
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var authorization = await AuthorizationService.AuthorizeAsync(authState.User, null, permission);
+        if (!authorization.Succeeded || (IsEdit && !BusinessRoleAccess.CanEditLead(authState.User)))
+        {
+            Snackbar.Add("Bạn không có quyền thực hiện thao tác này.", Severity.Warning);
+            return;
+        }
+
+        _saving = true;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var actorId = await AuthStateProvider.GetRequiredUserIdAsync(db);
+        _model.Dob = _dob is null ? null : DateOnly.FromDateTime(_dob.Value);
+        if (!_canEditSensitiveProfile && !IsEdit) ClearSensitiveProfile(_model);
+
+        // Nguồn ≠ "Giới thiệu" → bỏ liên kết CTV. Nếu là "Giới thiệu" + có CTV → gán luôn đại lý của CTV đó.
+        if (_model.Source != LeadSource.Referral)
+            _model.CollaboratorId = null;
+        else if (_selectedCtv is not null)
+            _model.AgentId = _selectedCtv.AgentId;
+
+        if (IsEdit)
+        {
+            var lead = await db.Leads.FirstOrDefaultAsync(l => l.Id == LeadId);
+            if (lead is null)
+            {
+                Snackbar.Add("Không tìm thấy lead.", Severity.Error);
+                return;
+            }
+
+            var oldValue = Snapshot(lead);
+            ApplyEditableFields(_model, lead, _canEditSensitiveProfile);
+            lead.UpdatedAt = DateTimeOffset.UtcNow;
+            db.LeadActivities.Add(new LeadActivity
+            {
+                LeadId = lead.Id,
+                ActivityType = LeadActivityType.Note,
+                Content = "Cập nhật thông tin lead",
+            });
+            db.AddAudit(actorId, "update", "leads", lead.Id, oldValue, Snapshot(lead));
+        }
+        else
+        {
+            _model.Code = $"LD-{DateTime.Now:yyyyMMdd}-{Random.Shared.Next(1000, 9999)}";
+            _model.Status = LeadStatus.New;
+            db.Leads.Add(_model);
+            db.LeadActivities.Add(new LeadActivity
+            {
+                LeadId = _model.Id,
+                ActivityType = LeadActivityType.Note,
+                Content = "Tạo lead mới",
+                NewStatus = LeadStatus.New,
+            });
+            db.AddAudit(actorId, "create", "leads", _model.Id, null, Snapshot(_model));
+        }
+        await db.SaveChangesAsync();
+
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private static void ApplyEditableFields(Lead source, Lead target, bool includeSensitiveProfile)
+    {
+        target.FullName = source.FullName.Trim();
+        target.Phone = source.Phone;
+        target.Dob = source.Dob;
+        target.Gender = source.Gender;
+        target.Cccd = source.Cccd;
+        target.Province = source.Province;
+        target.Address = source.Address;
+        target.Source = source.Source;
+        target.AgentId = source.AgentId;
+        target.CollaboratorId = source.CollaboratorId;
+        target.TargetCountry = source.TargetCountry;
+        target.InterestedJobOrderId = source.InterestedJobOrderId;
+        target.AssignedTo = source.AssignedTo;
+        target.Notes = source.Notes;
+
+        if (!includeSensitiveProfile) return;
+
+        target.Email = source.Email;
+        target.Occupation = source.Occupation;
+        target.EducationLevel = source.EducationLevel;
+        target.WorkExperience = source.WorkExperience;
+        target.Languages = source.Languages;
+    }
+
+    private static object Snapshot(Lead lead) => new
+    {
+        lead.Code,
+        lead.FullName,
+        lead.Phone,
+        lead.Dob,
+        lead.Gender,
+        lead.Cccd,
+        lead.Email,
+        lead.Province,
+        lead.Address,
+        lead.Occupation,
+        lead.EducationLevel,
+        lead.WorkExperience,
+        lead.Languages,
+        lead.Source,
+        lead.AgentId,
+        lead.CollaboratorId,
+        lead.TargetCountry,
+        lead.InterestedJobOrderId,
+        lead.AssignedTo,
+        lead.Status,
+        lead.Notes,
+    };
+
+    private static void ClearSensitiveProfile(Lead lead)
+    {
+        lead.Email = null;
+        lead.Occupation = null;
+        lead.EducationLevel = null;
+        lead.WorkExperience = null;
+        lead.Languages = null;
+    }
+
+    private async Task<bool> HasPermission(string permission)
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var result = await AuthorizationService.AuthorizeAsync(authState.User, null, permission);
+        return result.Succeeded;
+    }
+}

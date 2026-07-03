@@ -1,0 +1,444 @@
+@page "/messages"
+@attribute [Authorize(Policy = "messages:read")]
+@using System.Text.Json
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ISnackbar Snackbar
+@inject IDocumentStorage DocumentStorage
+@inject NavigationManager Nav
+
+<PageTitle>Tin nhắn — POLYMIND</PageTitle>
+
+<PageHeader Eyebrow="NỘI BỘ" Title="Tin nhắn" Subtitle="@($"{_contacts.Count} người có thể nhắn • {_contacts.Sum(c => c.Unread)} chưa đọc")" />
+
+<MudGrid>
+    @* Danh sách liên hệ *@
+    <MudItem xs="12" md="4">
+        <MudPaper Elevation="1" Class="pa-2" Style="height:100%">
+            <MudTextField @bind-Value="_search" Placeholder="Tìm người nhận..." Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
+            @if (_contacts.Count == 0)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true">Không có ai bạn được phép nhắn tin.</MudAlert>
+            }
+            else
+            {
+                <div class="message-contact-list-scroll">
+                    <MudList T="Guid" Dense="true" Class="pa-0">
+                        @foreach (var c in FilteredContacts)
+                        {
+                            <MudListItem T="Guid" OnClick="@(() => SelectContact(c.Id))"
+                                         Style="@(c.Id == _selectedId ? "background:var(--mud-palette-action-default-hover);border-radius:10px" : "border-radius:10px")">
+                                <div class="d-flex align-center" style="gap:10px">
+                                    <MudBadge Content="c.Unread" Color="Color.Error" Overlap="true" Visible="c.Unread > 0">
+                                        <MudAvatar Color="Color.Primary" Size="Size.Small">@Initials(c.Name)</MudAvatar>
+                                    </MudBadge>
+                                    <div style="min-width:0;flex:1">
+                                        <div class="d-flex align-center" style="gap:6px">
+                                            <MudText Typo="Typo.body2" Style="font-weight:600">@c.Name</MudText>
+                                        </div>
+                                        <MudText Typo="Typo.caption" Class="mud-text-secondary" Style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px">
+                                            @c.RoleLabel@(string.IsNullOrEmpty(c.LastBody) ? "" : $" • {c.LastBody}")
+                                        </MudText>
+                                    </div>
+                                </div>
+                            </MudListItem>
+                        }
+                    </MudList>
+                </div>
+            }
+        </MudPaper>
+    </MudItem>
+
+    @* Khung hội thoại *@
+    <MudItem xs="12" md="8">
+        <MudPaper Elevation="1" Class="pa-3 d-flex flex-column" Style="height:60vh;min-height:420px">
+            @if (_selectedId is null)
+            {
+                <div class="d-flex flex-column align-center justify-center flex-grow-1 mud-text-secondary">
+                    <MudIcon Icon="@Icons.Material.Filled.Forum" Size="Size.Large" />
+                    <MudText Typo="Typo.body2" Class="mt-2">Chọn một người để bắt đầu trò chuyện.</MudText>
+                </div>
+            }
+            else
+            {
+                <div class="d-flex align-center pb-2 mb-2" style="gap:10px;border-bottom:1px solid var(--mud-palette-lines-default)">
+                    <MudAvatar Color="Color.Primary" Size="Size.Small">@Initials(_selectedName)</MudAvatar>
+                    <div>
+                        <MudText Typo="Typo.subtitle2" Style="font-weight:600">@_selectedName</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@_selectedRole</MudText>
+                    </div>
+                </div>
+
+                <div class="chat-thread flex-grow-1" style="overflow-y:auto">
+                    @if (_thread.Count == 0)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary" Align="Align.Center">Chưa có tin nhắn. Hãy gửi lời chào!</MudText>
+                    }
+                    else
+                    {
+                        @foreach (var m in _thread)
+                        {
+                            <div class="chat-bubble @(m.Mine ? "chat-mine" : "chat-theirs")">
+                                @if (!string.IsNullOrWhiteSpace(m.Text))
+                                {
+                                    <div>@m.Text</div>
+                                }
+                                @if (m.Attachment is not null)
+                                {
+                                    <div class="chat-attachment">
+                                        @if (m.Attachment.IsImage && !string.IsNullOrWhiteSpace(m.Attachment.Url))
+                                        {
+                                            <img class="chat-attachment-image" src="@m.Attachment.Url" alt="@m.Attachment.FileName" />
+                                        }
+                                        <div class="chat-attachment-row">
+                                            <MudIcon Icon="@AttachmentIcon(m.Attachment)" Size="Size.Small" />
+                                            <div class="chat-attachment-text">
+                                                <span class="chat-attachment-name">@m.Attachment.FileName</span>
+                                                <span class="chat-attachment-meta">@FormatBytes(m.Attachment.FileSize)</span>
+                                            </div>
+                                            <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small" Color="Color.Inherit"
+                                                           OnClick="@(() => DownloadAttachment(m.Attachment))" />
+                                        </div>
+                                    </div>
+                                }
+                                <div class="chat-meta">@m.At.ToLocalTime().ToString("dd/MM HH:mm")</div>
+                            </div>
+                        }
+                    }
+                </div>
+
+                @if (_attachmentFile is not null)
+                {
+                    <div class="message-file-chip">
+                        <MudIcon Icon="@FileIcon(_attachmentFile)" Size="Size.Small" />
+                        <div class="message-file-main">
+                            <span class="message-file-name">@_attachmentFile.Name</span>
+                            <span class="message-file-meta">@FormatBytes(_attachmentFile.Size)</span>
+                        </div>
+                        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="ClearAttachment" />
+                    </div>
+                }
+                <div class="d-flex align-end mt-2" style="gap:8px">
+                    <label class="message-attach-button" title="Gửi file hoặc hình ảnh">
+                        <InputFile OnChange="OnAttachmentSelected" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx" class="message-attach-input" />
+                        <MudIcon Icon="@Icons.Material.Filled.AttachFile" Size="Size.Small" />
+                    </label>
+                    <MudTextField @bind-Value="_compose" Placeholder="Nhập tin nhắn..." Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Lines="2" Immediate="true" Class="flex-grow-1"
+                                  OnKeyDown="OnComposeKeyDown" />
+                    <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Send"
+                               OnClick="Send" Disabled="@(_sending || (string.IsNullOrWhiteSpace(_compose) && _attachmentFile is null))">Gửi</MudButton>
+                </div>
+            }
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private record Contact(Guid Id, string Name, string RoleLabel, string? LastBody, DateTimeOffset? LastAt, int Unread);
+    private record ThreadMsg(Guid Id, bool Mine, string Text, ThreadAttachment? Attachment, DateTimeOffset At);
+    private sealed record ParsedMessage(string Text, MessageAttachmentPayload? Attachment);
+    private sealed record MessageAttachmentPayload(string ObjectKey, string FileName, long FileSize, string? ContentType);
+    private sealed record ThreadAttachment(string ObjectKey, string FileName, long FileSize, string? ContentType, string? Url)
+    {
+        public bool IsImage => !string.IsNullOrWhiteSpace(ContentType)
+            && ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed class MessageBodyPayload
+    {
+        public string Kind { get; set; } = "polymind-message-v1";
+        public string Text { get; set; } = "";
+        public MessageAttachmentPayload? Attachment { get; set; }
+    }
+
+    private static readonly JsonSerializerOptions MessageJsonOptions = new(JsonSerializerDefaults.Web);
+
+    private Guid _meId;
+    private List<string> _myRoles = new();
+    private List<Contact> _contacts = new();
+    private List<ThreadMsg> _thread = new();
+    private Guid? _selectedId;
+    private string _selectedName = "";
+    private string _selectedRole = "";
+    private string _search = "";
+    private string _compose = "";
+    private IBrowserFile? _attachmentFile;
+    private bool _sending;
+
+    private IEnumerable<Contact> FilteredContacts => string.IsNullOrWhiteSpace(_search)
+        ? _contacts
+        : _contacts.Where(c => c.Name.Contains(_search, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync() => await LoadContacts();
+
+    private async Task LoadContacts()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _meId = await AuthStateProvider.GetRequiredUserIdAsync(db);
+
+        var rolesByUser = await (from ur in db.UserRoles
+                                 join r in db.Roles on ur.RoleId equals r.Id
+                                 select new { ur.UserId, Role = r.Name! })
+            .ToListAsync();
+        var rolesMap = rolesByUser.GroupBy(x => x.UserId).ToDictionary(g => g.Key, g => g.Select(x => x.Role).ToList());
+        _myRoles = rolesMap.GetValueOrDefault(_meId, new List<string>());
+
+        var users = await db.Users.Where(u => u.Id != _meId && u.IsActive)
+            .Select(u => new { u.Id, u.FullName, u.Email })
+            .ToListAsync();
+
+        // Tin nhắn liên quan tới tôi (để tính tin cuối + chưa đọc).
+        var myMsgs = await db.Messages
+            .Where(m => m.SenderId == _meId || m.RecipientId == _meId)
+            .ToListAsync();
+
+        var contacts = new List<Contact>();
+        foreach (var u in users)
+        {
+            var roles = rolesMap.GetValueOrDefault(u.Id, new List<string>());
+            if (!MessagingPolicy.CanMessage(_myRoles, roles)) continue;
+
+            var conv = myMsgs.Where(m => (m.SenderId == _meId && m.RecipientId == u.Id)
+                                      || (m.SenderId == u.Id && m.RecipientId == _meId)).ToList();
+            var last = conv.OrderByDescending(m => m.CreatedAt).FirstOrDefault();
+            var lastPreview = last is null ? null : MessagePreview(ParseMessageBody(last.Body));
+            var unread = conv.Count(m => m.RecipientId == _meId && m.SenderId == u.Id && !m.IsRead);
+            contacts.Add(new Contact(
+                u.Id,
+                string.IsNullOrWhiteSpace(u.FullName) ? (u.Email ?? "Người dùng") : u.FullName,
+                MessagingPolicy.PrimaryRoleLabel(roles),
+                lastPreview is null ? null : Truncate(lastPreview, 38),
+                last?.CreatedAt,
+                unread));
+        }
+
+        _contacts = contacts
+            .OrderByDescending(c => c.Unread)
+            .ThenByDescending(c => c.LastAt ?? DateTimeOffset.MinValue)
+            .ThenBy(c => c.Name)
+            .ToList();
+    }
+
+    private async Task SelectContact(Guid id)
+    {
+        _selectedId = id;
+        var c = _contacts.First(x => x.Id == id);
+        _selectedName = c.Name;
+        _selectedRole = c.RoleLabel;
+        await LoadThread();
+    }
+
+    private async Task LoadThread()
+    {
+        if (_selectedId is null) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var other = _selectedId.Value;
+
+        var msgs = await db.Messages
+            .Where(m => (m.SenderId == _meId && m.RecipientId == other)
+                     || (m.SenderId == other && m.RecipientId == _meId))
+            .OrderBy(m => m.CreatedAt)
+            .ToListAsync();
+
+        // Đánh dấu đã đọc các tin gửi cho tôi.
+        var unread = msgs.Where(m => m.RecipientId == _meId && !m.IsRead).ToList();
+        if (unread.Count > 0)
+        {
+            foreach (var m in unread) { m.IsRead = true; m.ReadAt = DateTimeOffset.UtcNow; }
+            await db.SaveChangesAsync();
+        }
+
+        var rows = new List<ThreadMsg>();
+        foreach (var m in msgs)
+        {
+            var parsed = ParseMessageBody(m.Body);
+            ThreadAttachment? attachment = null;
+            if (parsed.Attachment is not null)
+            {
+                string? url = null;
+                try
+                {
+                    url = await DocumentStorage.GetDownloadUrlAsync(parsed.Attachment.ObjectKey);
+                }
+                catch
+                {
+                    url = null;
+                }
+
+                attachment = new ThreadAttachment(
+                    parsed.Attachment.ObjectKey,
+                    parsed.Attachment.FileName,
+                    parsed.Attachment.FileSize,
+                    parsed.Attachment.ContentType,
+                    url);
+            }
+
+            rows.Add(new ThreadMsg(m.Id, m.SenderId == _meId, parsed.Text, attachment, m.CreatedAt));
+        }
+
+        _thread = rows;
+
+        if (unread.Count > 0) await LoadContacts(); // cập nhật badge
+    }
+
+    private async Task OnComposeKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+            await Send();
+    }
+
+    private async Task Send()
+    {
+        if (_selectedId is null || (string.IsNullOrWhiteSpace(_compose) && _attachmentFile is null) || _sending) return;
+        _sending = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            // Bảo vệ phía server: xác thực lại quyền nhắn tới người nhận.
+            var recipientRoles = await (from ur in db.UserRoles
+                                        join r in db.Roles on ur.RoleId equals r.Id
+                                        where ur.UserId == _selectedId.Value
+                                        select r.Name!).ToListAsync();
+            if (!MessagingPolicy.CanMessage(_myRoles, recipientRoles))
+            {
+                Snackbar.Add("Bạn không được phép nhắn tin cho người này.", Severity.Warning);
+                return;
+            }
+
+            MessageAttachmentPayload? attachment = null;
+            if (_attachmentFile is not null)
+            {
+                var uploaded = await DocumentStorage.UploadMessageAttachmentAsync(_meId, _selectedId.Value, _attachmentFile);
+                attachment = new MessageAttachmentPayload(
+                    uploaded.ObjectKey,
+                    uploaded.FileName,
+                    uploaded.FileSize,
+                    uploaded.ContentType);
+            }
+
+            var payload = new MessageBodyPayload
+            {
+                Text = _compose.Trim(),
+                Attachment = attachment,
+            };
+
+            db.Messages.Add(new Message
+            {
+                SenderId = _meId,
+                RecipientId = _selectedId.Value,
+                Body = SerializeMessageBody(payload),
+                IsRead = false,
+            });
+            await db.SaveChangesAsync();
+            _compose = "";
+            _attachmentFile = null;
+            await LoadThread();
+            await LoadContacts();
+        }
+        catch (InvalidOperationException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Không gửi được tin nhắn: {ex.Message}", Severity.Error);
+        }
+        finally { _sending = false; }
+    }
+
+    private void OnAttachmentSelected(InputFileChangeEventArgs args)
+    {
+        _attachmentFile = args.File;
+    }
+
+    private void ClearAttachment()
+    {
+        _attachmentFile = null;
+    }
+
+    private async Task DownloadAttachment(ThreadAttachment attachment)
+    {
+        try
+        {
+            var url = !string.IsNullOrWhiteSpace(attachment.Url)
+                ? attachment.Url
+                : await DocumentStorage.GetDownloadUrlAsync(attachment.ObjectKey);
+            Nav.NavigateTo(url, forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Không tạo được link tải file: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private static string SerializeMessageBody(MessageBodyPayload payload)
+        => JsonSerializer.Serialize(payload, MessageJsonOptions);
+
+    private static ParsedMessage ParseMessageBody(string body)
+    {
+        if (!string.IsNullOrWhiteSpace(body) && body.TrimStart().StartsWith('{'))
+        {
+            try
+            {
+                var payload = JsonSerializer.Deserialize<MessageBodyPayload>(body, MessageJsonOptions);
+                if (payload?.Kind == "polymind-message-v1")
+                    return new ParsedMessage(payload.Text ?? "", payload.Attachment);
+            }
+            catch
+            {
+                // Tin nhắn cũ hoặc JSON lỗi sẽ hiển thị nguyên văn.
+            }
+        }
+
+        return new ParsedMessage(body, null);
+    }
+
+    private static string MessagePreview(ParsedMessage message)
+    {
+        if (!string.IsNullOrWhiteSpace(message.Text))
+            return message.Text;
+        return message.Attachment is null ? "" : $"File: {message.Attachment.FileName}";
+    }
+
+    private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max] + "…";
+
+    private static string AttachmentIcon(ThreadAttachment attachment)
+        => FileIcon(attachment.FileName, attachment.ContentType);
+
+    private static string FileIcon(IBrowserFile file)
+        => FileIcon(file.Name, file.ContentType);
+
+    private static string FileIcon(string fileName, string? contentType = null)
+    {
+        if (!string.IsNullOrWhiteSpace(contentType) && contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            return Icons.Material.Filled.Image;
+
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        return ext switch
+        {
+            ".pdf" => Icons.Material.Filled.PictureAsPdf,
+            ".doc" or ".docx" => Icons.Material.Filled.Article,
+            ".xls" or ".xlsx" => Icons.Material.Filled.TableChart,
+            _ => Icons.Material.Filled.AttachFile,
+        };
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes >= 1024 * 1024)
+            return $"{bytes / 1024d / 1024d:0.#} MB";
+        if (bytes >= 1024)
+            return $"{bytes / 1024d:0.#} KB";
+        return $"{bytes} B";
+    }
+
+    private static string Initials(string name)
+    {
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return "?";
+        return parts.Length == 1 ? parts[0][..1].ToUpper() : $"{parts[^2][0]}{parts[^1][0]}".ToUpper();
+    }
+}

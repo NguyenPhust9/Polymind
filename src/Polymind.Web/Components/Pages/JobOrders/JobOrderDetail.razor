@@ -1,0 +1,316 @@
+@page "/jobs/{Id:guid}"
+@page "/job-orders/{Id:guid}"
+@attribute [Authorize(Policy = "job_orders:read")]
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Nav
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject IAuthorizationService AuthorizationService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Chi tiết Job — POLYMIND</PageTitle>
+
+@if (_job is null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <div class="d-flex justify-space-between align-center mb-3">
+        <MudButton StartIcon="@Icons.Material.Filled.ArrowBack" OnClick="@(() => Nav.NavigateTo("/jobs"))">Quay lại</MudButton>
+        <div class="d-flex flex-wrap" style="gap:8px">
+            @if (_canUpdate)
+            {
+                <MudButton Class="entity-action-button" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Edit" OnClick="OpenEdit">Sửa Job</MudButton>
+            }
+            @if (_canDelete)
+            {
+                <MudButton Class="entity-action-button" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteJobOrder" Disabled="_busy">Xóa</MudButton>
+            }
+        </div>
+    </div>
+
+    <MudGrid>
+        <MudItem xs="12" md="5">
+            <MudPaper Class="pa-4" Elevation="1">
+                <div class="d-flex justify-space-between align-center mb-3" style="gap:8px">
+                    <div class="d-flex align-center" style="gap:10px;min-width:0">
+                        <CountryFlag Style="_country" Size="40" />
+                        <div style="min-width:0">
+                            <MudText Typo="Typo.h6"><b>@(string.IsNullOrWhiteSpace(_job.CompanyName) ? _country.Name : _job.CompanyName)</b></MudText>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">@_job.Code</MudText>
+                        </div>
+                    </div>
+                    <div class="d-flex flex-column align-end" style="gap:4px">
+                        <MudChip T="string" Color="Labels.ColorOf(_job.Status)">@Labels.Vi(_job.Status)</MudChip>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@Labels.ColorOf(_job.Category)"
+                                 Icon="@Labels.IconOf(_job.Category)">@Labels.Vi(_job.Category)</MudChip>
+                    </div>
+                </div>
+                <MudDivider Class="mb-3" />
+                <MudGrid>
+                    @Field("Quốc gia", _job.Country)
+                    @Field("Ngành nghề", _job.Field)
+                    @Field("Nghiệp đoàn", _job.UnionName)
+                    @Field("Số lượng", _job.Quantity.ToString())
+                    @Field("Ngày đăng", _job.PostedDate?.ToString("dd/MM/yyyy"))
+                    <MudItem xs="6">
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">Hạn ứng tuyển</MudText>
+                        @if (_job.ApplicationDeadline is DateOnly dl)
+                        {
+                            var daysLeft = dl.DayNumber - DateOnly.FromDateTime(DateTime.Today).DayNumber;
+                            <MudText Typo="Typo.body2" Style="@(daysLeft <= 7 ? "color:var(--mud-palette-error);font-weight:600" : "")">
+                                @dl.ToString("dd/MM/yyyy")@(daysLeft < 0 ? " — đã hết hạn" : daysLeft <= 7 ? $" — còn {daysLeft} ngày" : "")
+                            </MudText>
+                        }
+                        else { <MudText Typo="Typo.body2">—</MudText> }
+                    </MudItem>
+                    @Field("Bắt đầu tuyển", _job.RecruitmentStartDate?.ToString("dd/MM/yyyy"))
+                    @Field("Dự kiến xuất cảnh", _job.ExpectedDepartureDate?.ToString("dd/MM/yyyy"))
+                </MudGrid>
+
+                <MudDivider Class="my-3" />
+                <div class="d-flex align-center flex-wrap" style="gap:6px">
+                    <MudIcon Icon="@Icons.Material.Filled.Payments" Size="Size.Small" Color="Color.Success" />
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">Mức lương:</MudText>
+                    @if (!string.IsNullOrWhiteSpace(_job.SalaryDescription))
+                    {
+                        <span class="money-bling" style="font-size:1.1rem">@_job.SalaryDescription</span>
+                    }
+                    else { <MudText Typo="Typo.body2">—</MudText> }
+                </div>
+                <div class="d-flex align-center flex-wrap mt-1" style="gap:6px">
+                    <MudIcon Icon="@Icons.Material.Filled.AccountBalanceWallet" Size="Size.Small" Color="Color.Warning" />
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">Tổng chi phí:</MudText>
+                    <Money Amount="_job.CostAmount" Size="1.1rem" />
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(_job.Requirements))
+                {
+                    <MudDivider Class="my-3" />
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">Yêu cầu tuyển dụng</MudText>
+                    <MudText Typo="Typo.body2">@_job.Requirements</MudText>
+                }
+            </MudPaper>
+
+            @* Card đãi ngộ & thưởng của công ty tiếp nhận *@
+            <MudPaper Class="pa-4 mt-4" Elevation="1" Style="border-left:5px solid var(--mud-palette-success);">
+                <div class="d-flex align-center mb-2" style="gap:8px">
+                    <MudIcon Icon="@Icons.Material.Filled.CardGiftcard" Color="Color.Success" />
+                    <MudText Typo="Typo.subtitle1"><b>Đãi ngộ &amp; Thưởng</b></MudText>
+                </div>
+                @if (string.IsNullOrWhiteSpace(_job.Benefits) && string.IsNullOrWhiteSpace(_job.Bonus))
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true">Chưa khai báo đãi ngộ/thưởng. Bấm "Sửa Job" để bổ sung.</MudAlert>
+                }
+                else
+                {
+                    @if (!string.IsNullOrWhiteSpace(_job.Benefits))
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">Chế độ đãi ngộ</MudText>
+                        <MudText Typo="Typo.body2" Class="mb-2" Style="white-space:pre-line">@_job.Benefits</MudText>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(_job.Bonus))
+                    {
+                        <div class="d-flex align-center mt-1" style="gap:6px">
+                            <MudIcon Icon="@Icons.Material.Filled.EmojiEvents" Size="Size.Small" Color="Color.Warning" />
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">Thưởng</MudText>
+                        </div>
+                        <MudText Typo="Typo.body2" Style="white-space:pre-line">@_job.Bonus</MudText>
+                    }
+                }
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="7">
+            <MudPaper Class="pa-4" Elevation="1">
+                <MudText Typo="Typo.subtitle1" Class="mb-3"><b>Ứng viên trong job (@_candidates.Count)</b></MudText>
+                @if (_candidates.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info">Chưa có ứng viên nào được gắn vào job này.</MudAlert>
+                }
+                else
+                {
+                    <MudHidden Breakpoint="Breakpoint.SmAndDown">
+                        <MudDataGrid T="CandidateRow" Items="_candidates" Hover="true" Dense="true" Striped="true"
+                                     RowClick="@(args => Nav.NavigateTo($"/candidates/{args.Item.CandidateId}"))" Class="cursor-pointer">
+                            <Columns>
+                                <PropertyColumn Property="x => x.Code" Title="Mã" />
+                                <PropertyColumn Property="x => x.FullName" Title="Họ tên" />
+                                <TemplateColumn Title="Bước hiện tại">
+                                    <CellTemplate>
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Primary">@Labels.Vi(context.Item.Step)</MudChip>
+                                    </CellTemplate>
+                                </TemplateColumn>
+                                <TemplateColumn Title="Trạng thái">
+                                    <CellTemplate>
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@Labels.Vi(context.Item.Status)</MudChip>
+                                    </CellTemplate>
+                                </TemplateColumn>
+                            </Columns>
+                        </MudDataGrid>
+                    </MudHidden>
+
+                    <MudHidden Breakpoint="Breakpoint.SmAndDown" Invert="true">
+                        @foreach (var c in _candidates)
+                        {
+                            <MudPaper Class="mobile-card pa-3" Elevation="0" Style="cursor:pointer" @onclick="@(() => Nav.NavigateTo($"/candidates/{c.CandidateId}"))">
+                                <div class="d-flex justify-space-between align-center" style="gap:8px">
+                                    <div style="min-width:0">
+                                        <MudText Typo="Typo.subtitle2" Style="font-weight:600">@c.FullName</MudText>
+                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@c.Code</MudText>
+                                    </div>
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@Labels.Vi(c.Status)</MudChip>
+                                </div>
+                                <MudChip T="string" Size="Size.Small" Color="Color.Primary" Class="mt-1">@Labels.Vi(c.Step)</MudChip>
+                            </MudPaper>
+                        }
+                    </MudHidden>
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private record CandidateRow(Guid CandidateId, string Code, string FullName, WorkflowStep Step, CandidateJobOrderStatus Status);
+
+    private JobOrder? _job;
+    private CountryDisplay.CountryStyle _country;
+    private List<CandidateRow> _candidates = new();
+    private bool _canUpdate;
+    private bool _canDelete;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        _canUpdate = await HasPermission("job_orders:update") && BusinessRoleAccess.CanEditJobOrder(authState.User);
+        _canDelete = await HasPermission("job_orders:delete") && BusinessRoleAccess.CanDeleteJobOrder(authState.User);
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _job = await db.JobOrders.FirstOrDefaultAsync(j => j.Id == Id);
+        if (_job is null) return;
+        _country = CountryDisplay.Of(_job.Country);
+        _candidates = await db.CandidateJobOrders
+            .Where(cjo => cjo.JobOrderId == Id)
+            .OrderByDescending(cjo => cjo.CreatedAt)
+            .Select(cjo => new CandidateRow(
+                cjo.CandidateId,
+                cjo.Candidate.Code,
+                cjo.Candidate.FullName,
+                cjo.CurrentStep,
+                cjo.Status))
+            .ToListAsync();
+    }
+
+    private async Task OpenEdit()
+    {
+        if (!_canUpdate) return;
+        var parameters = new DialogParameters<JobOrderDialog> { { x => x.JobOrderId, Id } };
+        var dialog = await DialogService.ShowAsync<JobOrderDialog>("Sửa Job", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+        {
+            Snackbar.Add("Đã cập nhật job", Severity.Success);
+            await Load();
+        }
+    }
+
+    private async Task DeleteJobOrder()
+    {
+        if (_job is null) return;
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (!await HasPermission("job_orders:delete") || !BusinessRoleAccess.CanDeleteJobOrder(authState.User))
+        {
+            Snackbar.Add("Bạn không có quyền xóa Job.", Severity.Warning);
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "Xóa Job?",
+            $"Xóa job \"{_job.Code}\". Hệ thống sẽ gỡ ứng viên khỏi job này, xóa tiến trình/visa/vé/hoa hồng liên quan; hồ sơ ứng viên và khoản thu vẫn được giữ. Bạn có chắc chắn?",
+            yesText: "Xóa",
+            cancelText: "Hủy");
+        if (confirm != true) return;
+
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var job = await db.JobOrders.FirstOrDefaultAsync(j => j.Id == Id);
+            if (job is null)
+            {
+                Snackbar.Add("Job này không còn tồn tại.", Severity.Info);
+                Nav.NavigateTo("/jobs");
+                return;
+            }
+
+            var actorId = await AuthStateProvider.GetRequiredUserIdAsync(db);
+            var assignmentIds = await db.CandidateJobOrders.Where(c => c.JobOrderId == Id).Select(c => c.Id).ToListAsync();
+            var stepRecords = await db.WorkflowStepRecords.Where(r => assignmentIds.Contains(r.CandidateJobOrderId)).ToListAsync();
+            var assignments = await db.CandidateJobOrders.Where(c => c.JobOrderId == Id).ToListAsync();
+            var visas = await db.Visas.Where(v => v.JobOrderId == Id).ToListAsync();
+            var flights = await db.Flights.Where(f => f.JobOrderId == Id).ToListAsync();
+            var commissions = await db.AgentCommissions.Where(c => c.JobOrderId == Id).ToListAsync();
+            var commissionConfigs = await db.AgentCommissionConfigs.Where(c => c.JobOrderId == Id).ToListAsync();
+            var leads = await db.Leads.Where(l => l.InterestedJobOrderId == Id).ToListAsync();
+            foreach (var lead in leads)
+                lead.InterestedJobOrderId = null;
+
+            var payments = await db.Payments.Where(p => p.JobOrderId == Id).ToListAsync();
+            foreach (var payment in payments)
+                payment.JobOrderId = null;
+
+            var notifications = await db.Notifications
+                .Where(n => (n.ReferenceType == "job_order" || n.ReferenceType == "job") && n.ReferenceId == Id)
+                .ToListAsync();
+
+            db.WorkflowStepRecords.RemoveRange(stepRecords);
+            db.CandidateJobOrders.RemoveRange(assignments);
+            db.Visas.RemoveRange(visas);
+            db.Flights.RemoveRange(flights);
+            db.AgentCommissions.RemoveRange(commissions);
+            db.AgentCommissionConfigs.RemoveRange(commissionConfigs);
+            db.Notifications.RemoveRange(notifications);
+            db.AddAudit(actorId, "delete", "job_orders", job.Id, new
+            {
+                job.Code,
+                job.Country,
+                job.CompanyName,
+                job.Field,
+                Assignments = assignments.Count,
+                Visas = visas.Count,
+                Flights = flights.Count,
+                PaymentsUnlinked = payments.Count,
+            }, null);
+            db.JobOrders.Remove(job);
+            await db.SaveChangesAsync();
+
+            Snackbar.Add("Đã xóa Job.", Severity.Success);
+            Nav.NavigateTo("/jobs");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task<bool> HasPermission(string permission)
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var result = await AuthorizationService.AuthorizeAsync(authState.User, null, permission);
+        return result.Succeeded;
+    }
+
+    private RenderFragment Field(string label, string? value) =>@<MudItem xs="6">
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">@label</MudText>
+        <MudText Typo="Typo.body2">@(string.IsNullOrWhiteSpace(value) ? "—" : value)</MudText>
+    </MudItem>;
+}

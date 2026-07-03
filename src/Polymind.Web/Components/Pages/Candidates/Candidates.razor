@@ -1,0 +1,322 @@
+@page "/candidates"
+@attribute [Authorize(Policy = "candidates:read")]
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Nav
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject IAuthorizationService AuthorizationService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject AgentScope AgentScope
+
+<PageTitle>@_pageTitle — POLYMIND</PageTitle>
+
+<PageHeader Eyebrow="@_pageEyebrow" Title="@_pageTitle" Subtitle="@_pageSubtitle">
+    <Actions>
+        <AuthorizeView Policy="candidates:create">
+            <Authorized>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd" OnClick="OpenCreate">
+                    Thêm ứng viên
+                </MudButton>
+            </Authorized>
+        </AuthorizeView>
+    </Actions>
+</PageHeader>
+
+<MudPaper Elevation="1" Class="pa-4">
+    <MudGrid>
+        <MudItem xs="12" sm="6">
+            <MudTextField @bind-Value="_search" Placeholder="Tìm tên, mã, tư vấn viên, quốc gia..." Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="6" sm="3">
+            <MudSelect T="string" @bind-Value="_countryFilter" Label="Lọc theo quốc gia" Variant="Variant.Outlined" Margin="Margin.Dense"
+                       Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Public" Clearable="true">
+                <MudSelectItem T="string" Value="@(null)">Tất cả quốc gia</MudSelectItem>
+                @foreach (var c in _countries)
+                {
+                    var st = CountryDisplay.Of(c);
+                    <MudSelectItem T="string" Value="@c">
+                        <div class="d-flex align-center" style="gap:8px"><CountryFlag Style="st" Size="20" /><span>@st.Name</span></div>
+                    </MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="6" sm="3">
+            <MudSelect T="WorkflowStep?" @bind-Value="_stepFilter" Label="Lọc theo bước" Variant="Variant.Outlined" Margin="Margin.Dense"
+                       Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.FilterList" Clearable="true">
+                <MudSelectItem T="WorkflowStep?" Value="@(null)">Tất cả các bước</MudSelectItem>
+                @foreach (var s in WorkflowSteps.Main)
+                {
+                    <MudSelectItem T="WorkflowStep?" Value="@s">@(WorkflowSteps.No(s)). @Labels.Vi(s)</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+    </MudGrid>
+
+    @* Desktop: bảng đầy đủ *@
+    <MudHidden Breakpoint="Breakpoint.SmAndDown">
+        <MudDataGrid T="Row" Items="Sorted" Hover="true" Dense="true" Striped="true"
+                     RowClick="@(args => Nav.NavigateTo($"/candidates/{args.Item.Id}"))" Class="cursor-pointer mt-2">
+            <Columns>
+                <PropertyColumn Property="x => x.ShortCode" Title="Mã" />
+                <PropertyColumn Property="x => x.FullName" Title="Họ tên" />
+                <TemplateColumn Title="Giới tính">
+                    <CellTemplate>
+                        @if (context.Item.Gender is Gender g)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="@GenderChipClass(g)"
+                                     Color="@GenderChipColor(g)"
+                                     Icon="@(g == Gender.Male ? Icons.Material.Filled.Male : g == Gender.Female ? Icons.Material.Filled.Female : Icons.Material.Filled.Transgender)">@Labels.Vi(g)</MudChip>
+                        }
+                        else { <span class="mud-text-secondary">—</span> }
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Tư vấn viên">
+                    <CellTemplate>
+                        @if (context.Item.ConsultantId is Guid cid)
+                        {
+                            <span class="chip-clickable" @onclick="@(() => ShowConsultant(cid))" @onclick:stopPropagation="true">
+                                <MudChip T="string" Size="Size.Small" Color="Color.Secondary" Variant="Variant.Filled" Icon="@Icons.Material.Filled.SupportAgent">TVV-@context.Item.ConsultantName</MudChip>
+                            </span>
+                        }
+                        else { <span class="mud-text-secondary">—</span> }
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Quốc gia">
+                    <CellTemplate>
+                        @{ var st = CountryDisplay.Of(context.Item.Country); }
+                        <span style="white-space:nowrap"><CountryFlag Style="st" Size="20" /> @st.Name</span>
+                    </CellTemplate>
+                </TemplateColumn>
+                <PropertyColumn Property="x => x.Field" Title="Nghề nghiệp" />
+                <TemplateColumn Title="Bước hiện tại">
+                    <CellTemplate>
+                        @if (context.Item.Step is null)
+                        {
+                            <span class="mud-text-secondary">—</span>
+                        }
+                        else
+                        {
+                            <StepChip Step="context.Item.Step.Value" />
+                        }
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Tiến độ">
+                    <CellTemplate>
+                        <div class="d-flex align-center" style="min-width:120px">
+                            <MudProgressLinear Color="Color.Success" Value="@context.Item.Progress" Class="flex-grow-1 mr-2" Style="height:8px" Rounded="true" />
+                            <MudText Typo="Typo.caption">@($"{context.Item.Progress:0}%")</MudText>
+                        </div>
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <PagerContent><MudDataGridPager T="Row" /></PagerContent>
+        </MudDataGrid>
+    </MudHidden>
+
+    @* Mobile: mỗi ứng viên là 1 thẻ bấm được *@
+    <MudHidden Breakpoint="Breakpoint.SmAndDown" Invert="true">
+        @if (!Sorted.Any())
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary py-4" Align="Align.Center">Không có ứng viên phù hợp.</MudText>
+        }
+        else
+        {
+            @foreach (var r in Sorted)
+            {
+                var st = CountryDisplay.Of(r.Country);
+                <MudPaper Class="mobile-card pa-3 mt-2" Elevation="0" Style="cursor:pointer" @onclick="@(() => Nav.NavigateTo($"/candidates/{r.Id}"))">
+                    <div class="d-flex justify-space-between align-center" style="gap:8px">
+                        <div style="min-width:0">
+                            <MudText Typo="Typo.subtitle2" Style="font-weight:600">@r.FullName</MudText>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">@r.ShortCode • @(r.Gender is Gender g ? Labels.Vi(g) : "—") • <CountryFlag Style="st" Size="16" /> @st.Name @(string.IsNullOrWhiteSpace(r.Field) ? "" : $"• {r.Field}")</MudText>
+                        </div>
+                        @if (r.Step is null)
+                        {
+                            <span class="mud-text-secondary">—</span>
+                        }
+                        else
+                        {
+                            <StepChip Step="r.Step.Value" />
+                        }
+                    </div>
+                    <div class="d-flex align-center mt-1" style="gap:6px">
+                        @if (r.ConsultantId is Guid cid)
+                        {
+                            <span class="chip-clickable" @onclick="@(() => ShowConsultant(cid))" @onclick:stopPropagation="true">
+                                <MudChip T="string" Size="Size.Small" Color="Color.Secondary" Variant="Variant.Filled" Icon="@Icons.Material.Filled.SupportAgent">TVV-@r.ConsultantName</MudChip>
+                            </span>
+                        }
+                        else { <MudText Typo="Typo.caption" Class="mud-text-secondary">Chưa có tư vấn viên</MudText> }
+                    </div>
+                    <div class="d-flex align-center mt-2" style="gap:8px">
+                        <MudProgressLinear Color="Color.Success" Value="@r.Progress" Class="flex-grow-1" Style="height:8px" Rounded="true" />
+                        <MudText Typo="Typo.caption">@($"{r.Progress:0}%")</MudText>
+                    </div>
+                </MudPaper>
+            }
+        }
+    </MudHidden>
+</MudPaper>
+
+@code {
+    private record Row(Guid Id, string Code, string ShortCode, string FullName, Gender? Gender,
+        Guid? ConsultantId, string? ConsultantName, string? Country, string? Field, WorkflowStep? Step, double Progress);
+
+    private List<Row> _rows = new();
+    private string _search = "";
+    private string? _countryFilter;
+    private WorkflowStep? _stepFilter;
+    private string _pageEyebrow = "HỒ SƠ";
+    private string _pageTitle = "Quản lý Ứng viên";
+    private string _pageSubtitle = "0 ứng viên trong quy trình";
+    // Danh sách quốc gia ĐỘNG: chỉ gồm các nước thực sự xuất hiện trong bảng ứng viên.
+    private List<string> _countries = new();
+
+    private IEnumerable<Row> Filtered => _rows.Where(r =>
+        (_countryFilter is null || string.Equals(r.Country, _countryFilter, StringComparison.OrdinalIgnoreCase))
+        && (_stepFilter is null || r.Step == _stepFilter)
+        && (string.IsNullOrWhiteSpace(_search)
+        || r.FullName.Contains(_search, StringComparison.OrdinalIgnoreCase)
+        || r.Code.Contains(_search, StringComparison.OrdinalIgnoreCase)
+        || (r.ConsultantName?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)
+        || (r.Country?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)
+        || (r.Field?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)));
+
+    // Xếp mặc định: ứng viên đang ở bước "Đăng ký" (bước 4 — cần tư vấn nhiều nhất để hoàn tất đăng ký) lên đầu;
+    // còn lại xếp theo thứ tự bước 1 → 20; ai chưa có bước xếp cuối.
+    private IEnumerable<Row> Sorted => Filtered
+        .OrderBy(r => r.Step == WorkflowStep.Registration ? 0 : 1)
+        .ThenBy(r => r.Step.HasValue ? (int)r.Step.Value : int.MaxValue)
+        .ThenBy(r => r.FullName);
+
+    private static string Short(string code)
+    {
+        var i = code.LastIndexOf('-');
+        return i >= 0 && i < code.Length - 1 ? "#" + code[(i + 1)..] : code;
+    }
+
+    private static string GenderChipClass(Gender gender) => gender switch
+    {
+        Gender.Male => "gender-chip-male",
+        Gender.Female => "gender-chip-female",
+        _ => string.Empty
+    };
+
+    private static Color GenderChipColor(Gender gender) => gender switch
+    {
+        Gender.Male => Color.Info,
+        Gender.Female => Color.Error,
+        _ => Color.Default
+    };
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task ShowConsultant(Guid id)
+    {
+        var parameters = new DialogParameters<ConsultantInfoDialog> { { x => x.ConsultantId, id } };
+        await DialogService.ShowAsync<ConsultantInfoDialog>("Thông tin tư vấn viên", parameters);
+    }
+
+    private async Task OpenCreate()
+    {
+        if (!await HasPermission("candidates:create"))
+        {
+            Snackbar.Add("Bạn không có quyền tạo ứng viên.", Severity.Warning);
+            return;
+        }
+
+        var dialog = await DialogService.ShowAsync<CandidateDialog>("Thêm ứng viên mới");
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+        {
+            Snackbar.Add("Đã thêm ứng viên mới", Severity.Success);
+            await Load();
+        }
+    }
+
+    private async Task<bool> HasPermission(string permission)
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var result = await AuthorizationService.AuthorizeAsync(authState.User, null, permission);
+        return result.Succeeded;
+    }
+
+    private async Task Load()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        // Đại lý chỉ thấy ứng viên do mình giới thiệu (spec §2.8).
+        var scope = await AgentScope.GetAsync();
+        var query = db.Candidates.AsQueryable();
+        if (scope.IsAgentOnly)
+            query = query.Where(c => c.AgentId == scope.AgentId);
+        else if (scope.IsCollaboratorOnly)
+            query = query.Where(c => c.CollaboratorId == scope.CollaboratorId);
+
+        var data = await query
+            .Select(c => new
+            {
+                c.Id, c.Code, c.FullName, c.Gender, c.ConsultantId,
+                Cjo = c.JobOrders.OrderByDescending(j => j.CreatedAt).FirstOrDefault()
+            })
+            .ToListAsync();
+
+        var jobInfo = await db.JobOrders.ToDictionaryAsync(j => j.Id, j => new { j.Country, j.Field });
+        var consultantNames = await db.Users.ToDictionaryAsync(u => u.Id, u => string.IsNullOrWhiteSpace(u.FullName) ? u.Email! : u.FullName);
+
+        _rows = data.Select(d =>
+        {
+            var job = d.Cjo is null ? null : jobInfo.GetValueOrDefault(d.Cjo.JobOrderId);
+            return new Row(
+                d.Id, d.Code, Short(d.Code), d.FullName, d.Gender,
+                d.ConsultantId,
+                d.ConsultantId is Guid cid ? consultantNames.GetValueOrDefault(cid) : null,
+                job?.Country,
+                job?.Field,
+                d.Cjo?.CurrentStep,
+                WorkflowSteps.Progress(d.Cjo?.CurrentStep));
+        }).ToList();
+
+        // Bộ lọc quốc gia chỉ liệt kê các nước thực sự có trong bảng (tự cập nhật khi thêm Jobs nước mới).
+        _countries = _rows
+            .Where(r => !string.IsNullOrWhiteSpace(r.Country))
+            .Select(r => r.Country!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(c => CountryDisplay.Of(c).Name)
+            .ToList();
+
+        // Nếu nước đang lọc không còn trong bảng (vd sau khi đổi dữ liệu), bỏ lọc.
+        if (_countryFilter is not null && !_countries.Contains(_countryFilter, StringComparer.OrdinalIgnoreCase))
+            _countryFilter = null;
+
+        UpdatePageHeader(scope);
+    }
+
+    private void UpdatePageHeader(AgentScopeInfo scope)
+    {
+        if (scope.IsCollaboratorOnly)
+        {
+            var collaboratorName = string.IsNullOrWhiteSpace(scope.CollaboratorName) ? "của tôi" : scope.CollaboratorName;
+            _pageEyebrow = "CỘNG TÁC VIÊN";
+            _pageTitle = $"Ứng viên - CTV {collaboratorName}";
+            _pageSubtitle = scope.AgentName is null
+                ? $"{_rows.Count:N0} ứng viên do bạn giới thiệu"
+                : $"{_rows.Count:N0} ứng viên do bạn giới thiệu • Thuộc đại lý {scope.AgentName}";
+            return;
+        }
+
+        if (scope.IsAgentOnly)
+        {
+            var agentName = string.IsNullOrWhiteSpace(scope.AgentName) ? "Đại lý của tôi" : scope.AgentName;
+            _pageEyebrow = "ĐẠI LÝ";
+            _pageTitle = $"Ứng viên - {agentName}";
+            _pageSubtitle = $"{_rows.Count:N0} ứng viên thuộc đại lý của bạn";
+            return;
+        }
+
+        _pageEyebrow = "HỒ SƠ";
+        _pageTitle = "Quản lý Ứng viên";
+        _pageSubtitle = $"{_rows.Count:N0} ứng viên trong quy trình";
+    }
+}

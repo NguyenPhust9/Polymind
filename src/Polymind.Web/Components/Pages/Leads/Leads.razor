@@ -1,0 +1,259 @@
+@page "/leads"
+@attribute [Authorize(Policy = "leads:read")]
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Nav
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject IAuthorizationService AuthorizationService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Lead (CRM) — POLYMIND</PageTitle>
+
+<PageHeader Eyebrow="CRM" Title="Quản lý Lead" Subtitle="@($"{_leads.Count} khách hàng tiềm năng")">
+    <Actions>
+        <AuthorizeView Policy="leads:create">
+            <Authorized>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate">
+                    Thêm Lead
+                </MudButton>
+            </Authorized>
+        </AuthorizeView>
+    </Actions>
+</PageHeader>
+
+<MudPaper Elevation="1" Class="pa-4">
+    <div class="d-flex flex-wrap gap-3 mb-3">
+        <MudTextField @bind-Value="_search" Placeholder="Tìm tên, SĐT, mã..." Adornment="Adornment.Start"
+                      AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" Class="flex-grow-1" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <MudSelect T="LeadStatus?" @bind-Value="_statusFilter" Placeholder="Trạng thái" Clearable="true"
+                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:180px">
+            @foreach (var s in Enum.GetValues<LeadStatus>())
+            {
+                <MudSelectItem T="LeadStatus?" Value="@s">@Labels.Vi(s)</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="LeadSource?" @bind-Value="_sourceFilter" Placeholder="Nguồn" Clearable="true"
+                   Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:160px">
+            @foreach (var s in Enum.GetValues<LeadSource>())
+            {
+                <MudSelectItem T="LeadSource?" Value="@s">@Labels.Vi(s)</MudSelectItem>
+            }
+        </MudSelect>
+    </div>
+
+    @* Desktop: bảng đầy đủ *@
+    <MudHidden Breakpoint="Breakpoint.SmAndDown">
+        <MudDataGrid T="Lead" Items="Filtered" Hover="true" Dense="true" Striped="true"
+                     RowClick="@(args => Nav.NavigateTo($"/leads/{args.Item.Id}"))" Class="cursor-pointer">
+            <Columns>
+                <TemplateColumn Title="Mã">
+                    <CellTemplate>@Short(context.Item.Code)</CellTemplate>
+                </TemplateColumn>
+                <PropertyColumn Property="x => x.FullName" Title="Họ tên" />
+                <TemplateColumn Title="Giới tính">
+                    <CellTemplate>
+                        @if (context.Item.Gender is Gender g)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="@GenderChipClass(g)"
+                                     Color="@GenderChipColor(g)"
+                                     Icon="@(g == Gender.Male ? Icons.Material.Filled.Male : g == Gender.Female ? Icons.Material.Filled.Female : Icons.Material.Filled.Transgender)">@Labels.Vi(g)</MudChip>
+                        }
+                        else { <span class="mud-text-secondary">—</span> }
+                    </CellTemplate>
+                </TemplateColumn>
+                <PropertyColumn Property="x => x.Phone" Title="SĐT" />
+                <PropertyColumn Property="x => x.Province" Title="Tỉnh/TP" />
+                <TemplateColumn Title="Nguồn">
+                    <CellTemplate>
+                        @{ var ctv = CtvLabel(context.Item); }
+                        @if (ctv is not null)
+                        {
+                            <span class="chip-clickable" @onclick="@(() => ShowCollaborator(context.Item.CollaboratorId!.Value))" @onclick:stopPropagation="true">
+                                <MudChip T="string" Size="Size.Small" Color="Color.Secondary" Variant="Variant.Filled" Icon="@Icons.Material.Filled.Diversity3">@ctv</MudChip>
+                            </span>
+                        }
+                        else
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@Labels.Vi(context.Item.Source)</MudChip>
+                        }
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Trạng thái">
+                    <CellTemplate>
+                        <MudChip T="string" Size="Size.Small" Color="Labels.ColorOf(context.Item.Status)">@Labels.Vi(context.Item.Status)</MudChip>
+                        @if (CareOverdueHours(context.Item) is int oh)
+                        {
+                            <MudTooltip Text="@CareTooltip(context.Item, oh)">
+                                <MudIcon Icon="@Icons.Material.Filled.NotificationsActive" Color="Color.Error" Size="Size.Small" Class="ml-1 lead-care-bell" Style="vertical-align:middle" />
+                            </MudTooltip>
+                        }
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Ngày tạo">
+                    <CellTemplate>@context.Item.CreatedAt.LocalDateTime.ToString("dd/MM/yyyy")</CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <PagerContent>
+                <MudDataGridPager T="Lead" />
+            </PagerContent>
+        </MudDataGrid>
+    </MudHidden>
+
+    @* Mobile: mỗi lead là 1 thẻ bấm được *@
+    <MudHidden Breakpoint="Breakpoint.SmAndDown" Invert="true">
+        @if (!Filtered.Any())
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary py-4" Align="Align.Center">Không có lead phù hợp.</MudText>
+        }
+        else
+        {
+            @foreach (var l in Filtered)
+            {
+                <MudPaper Class="mobile-card pa-3" Elevation="0" Style="cursor:pointer" @onclick="@(() => Nav.NavigateTo($"/leads/{l.Id}"))">
+                    <div class="d-flex justify-space-between align-center" style="gap:8px">
+                        <div style="min-width:0">
+                            <MudText Typo="Typo.subtitle2" Style="font-weight:600">@l.FullName</MudText>
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">@Short(l.Code) • @(l.Gender is Gender g ? Labels.Vi(g) : "—") • @(string.IsNullOrWhiteSpace(l.Phone) ? "—" : l.Phone)</MudText>
+                        </div>
+                        <div class="d-flex align-center" style="gap:4px">
+                            <MudChip T="string" Size="Size.Small" Color="Labels.ColorOf(l.Status)">@Labels.Vi(l.Status)</MudChip>
+                            @if (CareOverdueHours(l) is int moh)
+                            {
+                                <MudTooltip Text="@CareTooltip(l, moh)">
+                                    <MudIcon Icon="@Icons.Material.Filled.NotificationsActive" Color="Color.Error" Size="Size.Small" Class="lead-care-bell" Style="vertical-align:middle" />
+                                </MudTooltip>
+                            }
+                        </div>
+                    </div>
+                    <div class="d-flex justify-space-between align-center mt-2" style="gap:8px">
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@(string.IsNullOrWhiteSpace(l.Province) ? "—" : l.Province)</MudText>
+                        @{ var ctvm = CtvLabel(l); }
+                        @if (ctvm is not null)
+                        {
+                            <span class="chip-clickable" @onclick="@(() => ShowCollaborator(l.CollaboratorId!.Value))" @onclick:stopPropagation="true">
+                                <MudChip T="string" Size="Size.Small" Color="Color.Secondary" Variant="Variant.Filled" Icon="@Icons.Material.Filled.Diversity3">@ctvm</MudChip>
+                            </span>
+                        }
+                        else
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@Labels.Vi(l.Source)</MudChip>
+                        }
+                    </div>
+                </MudPaper>
+            }
+        }
+    </MudHidden>
+</MudPaper>
+
+<div class="d-flex justify-center mt-4">
+    <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.HowToReg"
+               OnClick="@(() => Nav.NavigateTo("/leads/converted"))">
+        Xem Lead đã chuyển thành ứng viên (@_convertedCount)
+    </MudButton>
+</div>
+
+@code {
+    private List<Lead> _leads = new();
+    private Dictionary<Guid, string> _ctvNames = new();
+    private Dictionary<Guid, DateTimeOffset> _lastStatusChange = new();
+    private string _search = "";
+    private LeadStatus? _statusFilter;
+    private LeadSource? _sourceFilter;
+
+    // Lead quá hạn chăm sóc (LeadCareRules) → trả số giờ đã đứng yên để hiện chuông cảnh báo đỏ.
+    private int? CareOverdueHours(Lead l)
+        => LeadCareRules.TryGetOverdue(l.Status, _lastStatusChange.GetValueOrDefault(l.Id, l.CreatedAt),
+            l.AppointmentAt, DateTimeOffset.UtcNow, out var hours) ? hours : null;
+
+    private static string CareTooltip(Lead l, int hours)
+        => $"Đứng ở trạng thái \"{Labels.Vi(l.Status)}\" đã {LeadCareRules.DurationLabel(hours)} — {LeadCareRules.NextAction(l.Status)}.";
+
+    // Lead nguồn "Giới thiệu" + có CTV → hiển thị "CTV-<tên>"; còn lại trả null để dùng nhãn nguồn thường.
+    private string? CtvLabel(Lead l)
+        => l.Source == LeadSource.Referral && l.CollaboratorId is Guid cid && _ctvNames.TryGetValue(cid, out var n)
+            ? $"CTV-{n}" : null;
+
+    // Rút gọn mã lead "LD-YYYYMMDD-XXXX" → "#XXXX" cho gọn bảng.
+    private static string Short(string code)
+    {
+        var i = code.LastIndexOf('-');
+        return i >= 0 && i < code.Length - 1 ? "#" + code[(i + 1)..] : code;
+    }
+
+    private static string GenderChipClass(Gender gender) => gender switch
+    {
+        Gender.Male => "gender-chip-male",
+        Gender.Female => "gender-chip-female",
+        _ => string.Empty
+    };
+
+    private static Color GenderChipColor(Gender gender) => gender switch
+    {
+        Gender.Male => Color.Info,
+        Gender.Female => Color.Error,
+        _ => Color.Default
+    };
+
+    private async Task ShowCollaborator(Guid id)
+    {
+        var parameters = new DialogParameters<CollaboratorInfoDialog> { { x => x.CollaboratorId, id } };
+        await DialogService.ShowAsync<CollaboratorInfoDialog>("Thông tin cộng tác viên", parameters);
+    }
+
+    private IEnumerable<Lead> Filtered => _leads.Where(l =>
+        (string.IsNullOrWhiteSpace(_search)
+            || l.FullName.Contains(_search, StringComparison.OrdinalIgnoreCase)
+            || (l.Phone?.Contains(_search) ?? false)
+            || l.Code.Contains(_search, StringComparison.OrdinalIgnoreCase))
+        && (_statusFilter is null || l.Status == _statusFilter)
+        && (_sourceFilter is null || l.Source == _sourceFilter));
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private int _convertedCount;
+
+    private async Task Load()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        // Lead đã chuyển thành ứng viên (có hồ sơ ứng viên trỏ tới) → ẩn khỏi danh sách chính,
+        // đưa sang trang riêng /leads/converted để tránh lẫn lộn trạng thái.
+        var convertedLeadIds = await db.Candidates.Where(c => c.LeadId != null)
+            .Select(c => c.LeadId!.Value).Distinct().ToListAsync();
+        _convertedCount = convertedLeadIds.Count;
+        _leads = await db.Leads.Where(l => !convertedLeadIds.Contains(l.Id))
+            .OrderByDescending(l => l.CreatedAt).ToListAsync();
+        _ctvNames = await db.Collaborators.ToDictionaryAsync(c => c.Id, c => c.FullName);
+
+        // Lần đổi trạng thái gần nhất của từng lead — mốc tính "quá hạn chăm sóc".
+        var leadIds = _leads.Select(l => l.Id).ToList();
+        _lastStatusChange = await db.LeadActivities
+            .Where(a => a.ActivityType == LeadActivityType.StatusChange && leadIds.Contains(a.LeadId))
+            .GroupBy(a => a.LeadId)
+            .Select(g => new { LeadId = g.Key, At = g.Max(a => a.CreatedAt) })
+            .ToDictionaryAsync(x => x.LeadId, x => x.At);
+    }
+
+    private async Task OpenCreate()
+    {
+        if (!await HasPermission("leads:create"))
+        {
+            Snackbar.Add("Bạn không có quyền tạo lead.", Severity.Warning);
+            return;
+        }
+
+        var dialog = await DialogService.ShowAsync<LeadDialog>("Thêm Lead mới");
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+        {
+            Snackbar.Add("Đã thêm lead mới", Severity.Success);
+            await Load();
+        }
+    }
+
+    private async Task<bool> HasPermission(string permission)
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var result = await AuthorizationService.AuthorizeAsync(authState.User, null, permission);
+        return result.Succeeded;
+    }
+}
